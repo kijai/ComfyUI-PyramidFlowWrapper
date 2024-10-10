@@ -10,4 +10,12 @@ todo
 
 Besides text encoder, this should already run at 10-12GB VRAM
 
+Model loading has not been optimized at all yet, currently needs everything from here:
+
+https://huggingface.co/rain1011/pyramid-flow-sd3/tree/main
+
+to:
+
+`ComfyUI/models/pyramidflow/pyramid-flow-sd3`
+
 Original repo: https://github.com/jy0205/Pyramid-Flow

@@ -60,17 +60,26 @@ class DownloadAndLoadPyramidFlowModel:
         base_path = folder_paths.get_folder_paths("pyramidflow")[0]
         
         model_path = os.path.join(base_path, model.split("/")[-1])
+        variant_path = os.path.join(model_path, variant)
         
-        if not os.path.exists(model_path):
+        if not os.path.exists(variant_path):
             log.info(f"Downloading model to: {model_path}")
-            from huggingface_hub import snapshot_download
-
-            snapshot_download(
-                repo_id=model,
-                #ignore_patterns=["*text_encoder*", "*tokenizer*"],
-                local_dir=model_path,
-                local_dir_use_symlinks=False,
-            )
+            if variant == "diffusion_transformer_384p":
+                from huggingface_hub import snapshot_download
+                snapshot_download(
+                    repo_id=model,
+                    ignore_patterns=["*diffusion_transformer_768p*"],
+                    local_dir=model_path,
+                    local_dir_use_symlinks=False,
+                )
+            elif variant == "diffusion_transformer_768p":
+                from huggingface_hub import snapshot_download
+                snapshot_download(
+                    repo_id=model,
+                    ignore_patterns=["*diffusion_transformer_384p*"],
+                    local_dir=model_path,
+                    local_dir_use_symlinks=False,
+                )
 
         model = PyramidDiTForVideoGeneration(
             model_path,
