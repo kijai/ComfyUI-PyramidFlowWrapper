@@ -75,7 +75,7 @@ class PyramidDiTForVideoGeneration:
                     if name != "pos_embedding":
                         param.data = param.data.to(model_dtype)
 
-        if fp8_fastmode == "fastmode":
+        if fp8_fastmode:
             from ..fp8_optimization import convert_fp8_linear
             convert_fp8_linear(self.dit, torch.bfloat16)
 
