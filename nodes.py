@@ -5,7 +5,7 @@ import comfy.model_management as mm
 from comfy.utils import ProgressBar, load_torch_file
 
 from contextlib import nullcontext
-
+from einops import rearrange
 from .pyramid_dit import PyramidDiTForVideoGeneration
 
 import logging
@@ -153,15 +153,15 @@ class PyramidFlowSampler:
         return {
             "required": {
                 "model": ("PYRAMIDFLOWMODEL",),
+                "prompt_embeds": ("PYRAMIDFLOWPROMPT",),
+                "width": ("INT", {"default": 640, "min": 128, "max": 2048, "step": 8}),
                 "height": ("INT", {"default": 384, "min": 128, "max": 2048, "step": 8}),
-                "width": ("INT", {"default": 656, "min": 128, "max": 2048, "step": 8}),
                 "steps": ("INT", {"default": 20, "min": 1, "max": 200, "step": 1}),
                 "video_steps": ("INT", {"default": 10, "min": 5, "max": 2048, "step": 4}),
-                "temp": ("INT", {"default": 8, "min": 1}),
+                "temp": ("INT", {"default": 8, "min": 1, "tooltip": "temp=16: 5s, temp=31: 10s"}),
                 "guidance_scale": ("FLOAT", {"default": 9.0, "min": 0.0, "max": 30.0, "step": 0.01, "tooltip": "The guidance for the first frame"}),
                 "video_guidance_scale": ("FLOAT", {"default": 5.0, "min": 0.0, "max": 30.0, "step": 0.01, "tooltip": "The guidance for the other video latent"}),
                 "seed": ("INT", {"default": 0, "min": 0, "max": 0xffffffffffffffff}),
-                "prompt": ("STRING", {"default": "", "multiline": True}),
                 "keep_model_loaded": ("BOOLEAN", {"default": False}),
                
             },
@@ -170,12 +170,12 @@ class PyramidFlowSampler:
             # }
         }
 
-    RETURN_TYPES = ("IMAGE", )
-    RETURN_NAMES = ("images", )
+    RETURN_TYPES = ("PYRAMIDFLOWMODEL", "LATENT", )
+    RETURN_NAMES = ("model","samples", )
     FUNCTION = "sample"
     CATEGORY = "PyramidFlowWrapper"
 
-    def sample(self, model, steps, prompt, seed, height, width, video_steps, temp, guidance_scale, video_guidance_scale, keep_model_loaded):
+    def sample(self, model, steps, prompt_embeds, seed, height, width, video_steps, temp, guidance_scale, video_guidance_scale, keep_model_loaded):
         mm.soft_empty_cache()
 
         device = mm.get_torch_device()
@@ -188,35 +188,143 @@ class PyramidFlowSampler:
         autocastcondition = not model.dtype == torch.float32
         autocast_context = torch.autocast(mm.get_autocast_device(device)) if autocastcondition else nullcontext()
 
-        model.dit.to(device)
+        #model.dit.to(device)
         #model.vae.to(device)
         #model.text_encoder.to(device)
         with autocast_context:
-            frames = model.generate(
-                prompt=prompt,
-                num_inference_steps=[steps, steps, steps],
-                video_num_inference_steps=[video_steps, video_steps, video_steps],
+            latents = model.generate(
+                prompt_embeds_dict = prompt_embeds,
+                device=device,
+                num_inference_steps=[steps, steps, steps], #why's this a list
+                video_num_inference_steps=[video_steps, video_steps, video_steps], #why's this a list
                 height=height,
                 width=width,
                 temp=temp,
                 guidance_scale=guidance_scale,         # The guidance for the first frame
                 video_guidance_scale=video_guidance_scale,   # The guidance for the other video latent
-                output_type="pt",
+                output_type="latent",
             )
-        print(frames.shape)
 
         if not keep_model_loaded:
-            model.to(offload_device)      
+            model.dit.to(offload_device)      
 
-        return (frames,)
+        return (model, {"samples": latents},)
+    
+class PyramidFlowTextEncode:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "model": ("PYRAMIDFLOWMODEL",),
+                "positive_prompt": ("STRING", {"default": "hyper quality, Ultra HD, 8K", "multiline": True} ),
+                "negative_prompt": ("STRING", {"default": "", "multiline": True} ),
+                "keep_model_loaded": ("BOOLEAN", {"default": False}),
+               
+            },
+            # "optional": {
+            #     "samples": ("LATENT", ),
+            # }
+        }
+
+    RETURN_TYPES = ("PYRAMIDFLOWPROMPT", )
+    RETURN_NAMES = ("prompt_embeds", )
+    FUNCTION = "sample"
+    CATEGORY = "PyramidFlowWrapper"
+
+    def sample(self, model, positive_prompt, negative_prompt, keep_model_loaded):
+        mm.soft_empty_cache()
+
+        device = mm.get_torch_device()
+        offload_device = mm.unet_offload_device()
+        model.vae.enable_tiling()
+
+        autocastcondition = not model.dtype == torch.float32
+        autocast_context = torch.autocast(mm.get_autocast_device(device)) if autocastcondition else nullcontext()
+
+        model.text_encoder.to(device)
+        with autocast_context:
+            prompt_embeds, prompt_attention_mask, pooled_prompt_embeds = model.text_encoder(positive_prompt, device)
+            negative_prompt_embeds, negative_prompt_attention_mask, pooled_negative_prompt_embeds = model.text_encoder(negative_prompt, device)
+        if not keep_model_loaded:
+            model.text_encoder.to(offload_device)
+
+        embeds = {
+            "prompt_embeds": prompt_embeds,
+            "attention_mask": prompt_attention_mask,
+            "pooled_embeds": pooled_prompt_embeds,
+            "negative_prompt_embeds": negative_prompt_embeds,
+            "negative_attention_mask": negative_prompt_attention_mask,
+            "negative_pooled_embeds": pooled_negative_prompt_embeds
+        }
+
+        return (embeds,)
+    
+class PyramidFlowVAEDecode:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "model": ("PYRAMIDFLOWMODEL",),
+                "samples": ("LATENT",),
+                "tile_sample_min_size": ("INT", {"default": 128, "min": 64, "max": 512, "step": 8}),
+                "window_size": ("INT", {"default": 2, "min": 1, "max": 4, "step": 1}),
+               
+            },
+        }
+
+    RETURN_TYPES = ("IMAGE", )
+    RETURN_NAMES = ("images", )
+    FUNCTION = "sample"
+    CATEGORY = "PyramidFlowWrapper"
+
+    def sample(self, model, samples, tile_sample_min_size, window_size):
+        mm.soft_empty_cache()
+
+        latents = samples["samples"]
+        self.vae = model.vae
+
+        device = mm.get_torch_device()
+        offload_device = mm.unet_offload_device()
+        model.vae.enable_tiling()
+
+        # For the image latent
+        self.vae_shift_factor = 0.1490
+        self.vae_scale_factor = 1 / 1.8415
+
+        # For the video latent
+        self.vae_video_shift_factor = -0.2343
+        self.vae_video_scale_factor = 1 / 3.0986
+
+        self.vae.to(device)
+        if latents.shape[2] == 1:
+            latents = (latents / self.vae_scale_factor) + self.vae_shift_factor
+        else:
+            latents[:, :, :1] = (latents[:, :, :1] / self.vae_scale_factor) + self.vae_shift_factor
+            latents[:, :, 1:] = (latents[:, :, 1:] / self.vae_video_scale_factor) + self.vae_video_shift_factor
+
+        image = self.vae.decode(latents, temporal_chunk=True, window_size=window_size, tile_sample_min_size=tile_sample_min_size).sample
+
+        self.vae.to(offload_device)
+
+        image = image.float()
+        image = (image / 2 + 0.5).clamp(0, 1)
+        image = rearrange(image, "B C T H W -> (B T) H W C")
+        image = image.cpu().float()
+
+        
+        return (image,)
     
 
 NODE_CLASS_MAPPINGS = {
     "DownloadAndLoadPyramidFlowModel": DownloadAndLoadPyramidFlowModel,
     "PyramidFlowSampler": PyramidFlowSampler,
+    "PyramidFlowVAEDecode": PyramidFlowVAEDecode,
+    "PyramidFlowTextEncode": PyramidFlowTextEncode,
    
 }
 NODE_DISPLAY_NAME_MAPPINGS = {
     "DownloadAndLoadPyramidFlowModel": "(Down)load PyramidFlow Model",
     "PyramidFlowSampler": "PyramidFlow Sampler",
+    "PyramidFlowVAEDecode" : "PyramidFlow VAE Decode",
+    "PyramidFlowTextEncode": "PyramidFlow Text Encode",
     }

@@ -1,38 +1,26 @@
 import torch
 import os
-import sys
-import torch.nn as nn
+
 import torch.nn.functional as F
 
 from collections import OrderedDict
 from einops import rearrange
 from diffusers.utils.torch_utils import randn_tensor
-import numpy as np
+
 import math
-import random
 import PIL
 from PIL import Image
 from tqdm import tqdm
 from torchvision import transforms
 from copy import deepcopy
 from typing import Any, Callable, Dict, List, Optional, Union
-from accelerate import Accelerator
 from ..diffusion_schedulers import PyramidFlowMatchEulerDiscreteScheduler
 from ..video_vae.modeling_causal_vae import CausalVideoVAE
-
-# from ..trainer_misc import (
-#     all_to_all,
-#     is_sequence_parallel_initialized,
-#     get_sequence_parallel_group,
-#     get_sequence_parallel_group_rank,
-#     get_sequence_parallel_rank,
-#     get_sequence_parallel_world_size,
-#     get_rank,
-# )
 
 from .modeling_pyramid_mmdit import PyramidDiffusionMMDiT
 from .modeling_text_encoder import SD3TextEncoderWithMask
 
+from comfy.utils import ProgressBar
 
 def compute_density_for_timestep_sampling(
     weighting_scheme: str, batch_size: int, logit_mean: float = None, logit_std: float = None, mode_scale: float = None
@@ -205,12 +193,22 @@ class PyramidDiTForVideoGeneration:
         latents = randn_tensor(shape, generator=generator, device=device, dtype=dtype)
         return latents
 
+    # def sample_block_noise(self, bs, ch, temp, height, width):
+    #     gamma = self.scheduler.config.gamma
+    #     dist = torch.distributions.multivariate_normal.MultivariateNormal(torch.zeros(4), torch.eye(4) * (1 + gamma) - torch.ones(4, 4) * gamma)
+    #     block_number = bs * ch * temp * (height // 2) * (width // 2)
+    #     noise = torch.stack([dist.sample() for _ in range(block_number)]) # [block number, 4]
+    #     noise = rearrange(noise, '(b c t h w) (p q) -> b c t (h p) (w q)',b=bs,c=ch,t=temp,h=height//2,w=width//2,p=2,q=2)
+    #     return noise
+    
     def sample_block_noise(self, bs, ch, temp, height, width):
         gamma = self.scheduler.config.gamma
-        dist = torch.distributions.multivariate_normal.MultivariateNormal(torch.zeros(4), torch.eye(4) * (1 + gamma) - torch.ones(4, 4) * gamma)
+        epsilon = 1e-5  # Small value to ensure positive definiteness
+        covariance_matrix = torch.eye(4) * (1 + gamma) - torch.ones(4, 4) * gamma + torch.eye(4) * epsilon
+        dist = torch.distributions.multivariate_normal.MultivariateNormal(torch.zeros(4), covariance_matrix)
         block_number = bs * ch * temp * (height // 2) * (width // 2)
-        noise = torch.stack([dist.sample() for _ in range(block_number)]) # [block number, 4]
-        noise = rearrange(noise, '(b c t h w) (p q) -> b c t (h p) (w q)',b=bs,c=ch,t=temp,h=height//2,w=width//2,p=2,q=2)
+        noise = torch.stack([dist.sample() for _ in range(block_number)])  # [block number, 4]
+        noise = rearrange(noise, '(b c t h w) (p q) -> b c t (h p) (w q)', b=bs, c=ch, t=temp, h=height//2, w=width//2, p=2, q=2)
         return noise
 
     @torch.no_grad()
@@ -232,6 +230,7 @@ class PyramidDiTForVideoGeneration:
     ):
         stages = self.stages
         intermed_latents = []
+        #print(f"Start generating one unit, the latents shape is {latents.shape}")
 
         for i_s in range(len(stages)):
             self.scheduler.set_timesteps(num_inference_steps[i_s], i_s, device=device)
@@ -295,8 +294,9 @@ class PyramidDiTForVideoGeneration:
     @torch.no_grad()
     def generate_i2v(
         self,
-        prompt: Union[str, List[str]] = '',
-        input_image: PIL.Image = None,
+        #prompt: Union[str, List[str]] = '',
+        prompt_embeds_dict: dict,
+        input_image: torch.Tensor,
         temp: int = 1,
         num_inference_steps: Optional[Union[int, List[int]]] = 28,
         guidance_scale: float = 7.0,
@@ -316,23 +316,23 @@ class PyramidDiTForVideoGeneration:
         height = input_image.height
 
         assert temp % self.frame_per_unit == 0, "The frames should be divided by frame_per unit"
+        batch_size = 1
+        # if isinstance(prompt, str):
+        #     batch_size = 1
+        #     prompt = prompt + ", hyper quality, Ultra HD, 8K"   # adding this prompt to improve aesthetics
+        # else:
+        #     assert isinstance(prompt, list)
+        #     batch_size = len(prompt)
+        #     prompt = [_ + ", hyper quality, Ultra HD, 8K" for _ in prompt]
 
-        if isinstance(prompt, str):
-            batch_size = 1
-            prompt = prompt + ", hyper quality, Ultra HD, 8K"   # adding this prompt to improve aesthetics
-        else:
-            assert isinstance(prompt, list)
-            batch_size = len(prompt)
-            prompt = [_ + ", hyper quality, Ultra HD, 8K" for _ in prompt]
-
-        if isinstance(num_inference_steps, int):
-            num_inference_steps = [num_inference_steps] * len(self.stages)
+        # if isinstance(num_inference_steps, int):
+        #     num_inference_steps = [num_inference_steps] * len(self.stages)
         
-        negative_prompt = negative_prompt or ""
+        # negative_prompt = negative_prompt or ""
 
-        # Get the text embeddings
-        prompt_embeds, prompt_attention_mask, pooled_prompt_embeds = self.text_encoder(prompt, device)
-        negative_prompt_embeds, negative_prompt_attention_mask, negative_pooled_prompt_embeds = self.text_encoder(negative_prompt, device)
+        # # Get the text embeddings
+        # prompt_embeds, prompt_attention_mask, pooled_prompt_embeds = self.text_encoder(prompt, device)
+        # negative_prompt_embeds, negative_prompt_attention_mask, negative_pooled_prompt_embeds = self.text_encoder(negative_prompt, device)
 
         if use_linear_guidance:
             max_guidance_scale = guidance_scale
@@ -342,10 +342,18 @@ class PyramidDiTForVideoGeneration:
         self._guidance_scale = guidance_scale
         self._video_guidance_scale = video_guidance_scale
 
+        positive_prompt_embeds = prompt_embeds_dict['prompt_embeds']
+        positive_pooled_prompt_embeds = prompt_embeds_dict['pooled_embeds']
+        positive_prompt_attention_mask = prompt_embeds_dict['attention_mask']
+
+        negative_prompt_embeds = prompt_embeds_dict['negative_prompt_embeds']
+        negative_pooled_prompt_embeds = prompt_embeds_dict['negative_pooled_embeds']
+        negative_prompt_attention_mask = prompt_embeds_dict['negative_attention_mask']
+
         if self.do_classifier_free_guidance:
-            prompt_embeds = torch.cat([negative_prompt_embeds, prompt_embeds], dim=0)
-            pooled_prompt_embeds = torch.cat([negative_pooled_prompt_embeds, pooled_prompt_embeds], dim=0)
-            prompt_attention_mask = torch.cat([negative_prompt_attention_mask, prompt_attention_mask], dim=0)
+            prompt_embeds = torch.cat([negative_prompt_embeds, positive_prompt_embeds], dim=0)
+            pooled_prompt_embeds = torch.cat([negative_pooled_prompt_embeds, positive_pooled_prompt_embeds], dim=0)
+            prompt_attention_mask = torch.cat([negative_prompt_attention_mask, positive_prompt_attention_mask], dim=0)
 
         # Create the initial random noise
         num_channels_latents = self.dit.config.in_channels
@@ -449,7 +457,7 @@ class PyramidDiTForVideoGeneration:
     @torch.no_grad()
     def generate(
         self,
-        prompt: Union[str, List[str]] = None,
+        prompt_embeds_dict: dict,
         height: Optional[int] = None,
         width: Optional[int] = None,
         temp: int = 1,
@@ -464,19 +472,20 @@ class PyramidDiTForVideoGeneration:
         num_images_per_prompt: Optional[int] = 1,
         generator: Optional[Union[torch.Generator, List[torch.Generator]]] = None,
         output_type: Optional[str] = "pil",
+        device: Optional[torch.device] = None,
     ):
-        device = self.device
+        #device = self.device
         dtype = self.dtype
 
         assert (temp - 1) % self.frame_per_unit == 0, "The frames should be divided by frame_per unit"
 
-        if isinstance(prompt, str):
-            batch_size = 1
-            prompt = prompt + ", hyper quality, Ultra HD, 8K"        # adding this prompt to improve aesthetics
-        else:
-            assert isinstance(prompt, list)
-            batch_size = len(prompt)
-            prompt = [_ + ", hyper quality, Ultra HD, 8K" for _ in prompt]
+        # if isinstance(prompt, str):
+        #     batch_size = 1
+        #     prompt = prompt + ", hyper quality, Ultra HD, 8K"        # adding this prompt to improve aesthetics
+        # else:
+        #     assert isinstance(prompt, list)
+        #     batch_size = len(prompt)
+        #     prompt = [_ + ", hyper quality, Ultra HD, 8K" for _ in prompt]
 
         if isinstance(num_inference_steps, int):
             num_inference_steps = [num_inference_steps] * len(self.stages)
@@ -484,13 +493,15 @@ class PyramidDiTForVideoGeneration:
         if isinstance(video_num_inference_steps, int):
             video_num_inference_steps = [video_num_inference_steps] * len(self.stages)
 
-        negative_prompt = negative_prompt or ""
+        #negative_prompt = negative_prompt or ""
 
-        # Get the text embeddings
-        self.text_encoder.to(device)
-        prompt_embeds, prompt_attention_mask, pooled_prompt_embeds = self.text_encoder(prompt, device)
-        negative_prompt_embeds, negative_prompt_attention_mask, negative_pooled_prompt_embeds = self.text_encoder(negative_prompt, device)
-        self.text_encoder.to('cpu')
+        # # Get the text embeddings
+        # self.text_encoder.to(device)
+        # prompt_embeds, prompt_attention_mask, pooled_prompt_embeds = self.text_encoder(prompt, device)
+        # negative_prompt_embeds, negative_prompt_attention_mask, negative_pooled_prompt_embeds = self.text_encoder(negative_prompt, device)
+        # self.text_encoder.to('cpu')
+
+        batch_size=1
 
         if use_linear_guidance:
             max_guidance_scale = guidance_scale
@@ -501,10 +512,19 @@ class PyramidDiTForVideoGeneration:
         self._guidance_scale = guidance_scale
         self._video_guidance_scale = video_guidance_scale
 
+        positive_prompt_embeds = prompt_embeds_dict['prompt_embeds']
+        positive_pooled_prompt_embeds = prompt_embeds_dict['pooled_embeds']
+        positive_prompt_attention_mask = prompt_embeds_dict['attention_mask']
+
+        negative_prompt_embeds = prompt_embeds_dict['negative_prompt_embeds']
+        negative_pooled_prompt_embeds = prompt_embeds_dict['negative_pooled_embeds']
+        negative_prompt_attention_mask = prompt_embeds_dict['negative_attention_mask']
+       
+
         if self.do_classifier_free_guidance:
-            prompt_embeds = torch.cat([negative_prompt_embeds, prompt_embeds], dim=0)
-            pooled_prompt_embeds = torch.cat([negative_pooled_prompt_embeds, pooled_prompt_embeds], dim=0)
-            prompt_attention_mask = torch.cat([negative_prompt_attention_mask, prompt_attention_mask], dim=0)
+            prompt_embeds = torch.cat([negative_prompt_embeds, positive_prompt_embeds], dim=0)
+            pooled_prompt_embeds = torch.cat([negative_pooled_prompt_embeds, positive_pooled_prompt_embeds], dim=0)
+            prompt_attention_mask = torch.cat([negative_prompt_attention_mask, positive_prompt_attention_mask], dim=0)
 
         # Create the initial random noise
         num_channels_latents = self.dit.config.in_channels
@@ -534,6 +554,10 @@ class PyramidDiTForVideoGeneration:
 
         generated_latents_list = []    # The generated results
         last_generated_latents = None
+
+        #self.dit.to(torch.float8_e4m3fn)
+        self.dit.to(device)
+        comfy_pbar = ProgressBar(num_units)
 
         for unit_index in tqdm(range(num_units)):
             if use_linear_guidance:
@@ -602,21 +626,22 @@ class PyramidDiTForVideoGeneration:
                     generator,
                     is_first_frame=False,
                 )
-
+            comfy_pbar.update(1)
             generated_latents_list.append(intermed_latents[-1])
             last_generated_latents = intermed_latents
+        self.dit.to('cpu')
 
         generated_latents = torch.cat(generated_latents_list, dim=2)
 
         if output_type == "latent":
             image = generated_latents
         else:
-            image = self.decode_latent(generated_latents)
+            image = self.decode_latent(generated_latents, device)
 
         return image
 
-    def decode_latent(self, latents):
-        self.vae.to(self.device)
+    def decode_latent(self, latents, device):
+        self.vae.to(device)
         if latents.shape[2] == 1:
             latents = (latents / self.vae_scale_factor) + self.vae_shift_factor
         else:
