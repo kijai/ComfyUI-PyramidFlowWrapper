@@ -166,11 +166,11 @@ class PyramidFlowSampler:
                 "prompt_embeds": ("PYRAMIDFLOWPROMPT",),
                 "width": ("INT", {"default": 640, "min": 128, "max": 2048, "step": 8}),
                 "height": ("INT", {"default": 384, "min": 128, "max": 2048, "step": 8}),
-                "steps": ("INT", {"default": 20, "min": 1, "max": 200, "step": 1}),
-                "video_steps": ("INT", {"default": 10, "min": 5, "max": 2048, "step": 4}),
+                "first_frame_steps": ("INT", {"default": 20, "min": 1, "max": 200, "step": 1, "tooltip": "Number of steps for the first frame, no effect when using input_latent"}),
+                "video_steps": ("INT", {"default": 10, "min": 1, "max": 2048, "step": 1, "tooltip": "Number of steps for the video latents"}),
                 "temp": ("INT", {"default": 8, "min": 1, "tooltip": "temp=16: 5s, temp=31: 10s"}),
                 "guidance_scale": ("FLOAT", {"default": 9.0, "min": 0.0, "max": 30.0, "step": 0.01, "tooltip": "The guidance for the first frame"}),
-                "video_guidance_scale": ("FLOAT", {"default": 5.0, "min": 0.0, "max": 30.0, "step": 0.01, "tooltip": "The guidance for the other video latent"}),
+                "video_guidance_scale": ("FLOAT", {"default": 5.0, "min": 0.0, "max": 30.0, "step": 0.01, "tooltip": "The guidance for the video latents"}),
                 "seed": ("INT", {"default": 0, "min": 0, "max": 0xffffffffffffffff}),
                 "keep_model_loaded": ("BOOLEAN", {"default": False}),
                
@@ -185,7 +185,7 @@ class PyramidFlowSampler:
     FUNCTION = "sample"
     CATEGORY = "PyramidFlowWrapper"
 
-    def sample(self, model, steps, prompt_embeds, seed, height, width, video_steps, temp, guidance_scale, video_guidance_scale, 
+    def sample(self, model, first_frame_steps, prompt_embeds, seed, height, width, video_steps, temp, guidance_scale, video_guidance_scale, 
                keep_model_loaded, input_latent=None):
         mm.soft_empty_cache()
 
@@ -203,7 +203,7 @@ class PyramidFlowSampler:
                 latents = model["model"].generate(
                     prompt_embeds_dict = prompt_embeds,
                     device=device,
-                    num_inference_steps=[steps, steps, steps], #why's this a list
+                    num_inference_steps=[first_frame_steps, first_frame_steps, first_frame_steps], #why's this a list
                     video_num_inference_steps=[video_steps, video_steps, video_steps], #why's this a list
                     height=height,
                     width=width,
@@ -218,7 +218,7 @@ class PyramidFlowSampler:
                     prompt_embeds_dict = prompt_embeds,
                     input_image_latent=input_latent,
                     device=device,
-                    num_inference_steps=[steps, steps, steps], #why's this a list
+                    num_inference_steps=[video_steps, video_steps, video_steps], #why's this a list
                     height=height,
                     width=width,
                     temp=temp,
