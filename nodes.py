@@ -33,9 +33,9 @@ class DownloadAndLoadPyramidFlowModel:
 
             },
             "optional": {
-                "precision": (["fp16", "fp32", "bf16"],
-                    {"default": "bf16", "tooltip": "official recommendation is that 2b model should be fp16, 5b model should be bf16"}
-                ),
+                "model_dtype": (["fp16", "fp32", "bf16"],{"default": "bf16", }),
+                "text_encoder_dtype": (["fp16", "fp32", "bf16"],{"default": "bf16", }),
+                "vae_dtype": (["fp16", "fp32", "bf16"],{"default": "bf16", }),
                 #"fp8_transformer": (['disabled', 'enabled', 'fastmode'], {"default": 'disabled', "tooltip": "enabled casts the transformer to torch.float8_e4m3fn, fastmode is only for latest nvidia GPUs"}),
                 #"compile": (["disabled","onediff","torch"], {"tooltip": "compile the model for faster inference, these are advanced options only available on Linux, see readme for more info"}),
             }
@@ -46,13 +46,16 @@ class DownloadAndLoadPyramidFlowModel:
     FUNCTION = "loadmodel"
     CATEGORY = "PyramidFlowWrapper"
 
-    def loadmodel(self, model, variant, precision):
+    def loadmodel(self, model, variant, model_dtype, text_encoder_dtype, vae_dtype):
 
         device = mm.get_torch_device()
         offload_device = mm.unet_offload_device()
         mm.soft_empty_cache()
 
-        dtype = {"bf16": torch.bfloat16, "fp16": torch.float16, "fp32": torch.float32}[precision]
+        model_dtype = {"bf16": torch.bfloat16, "fp16": torch.float16, "fp32": torch.float32}[model_dtype]
+        text_encoder_dtype = {"bf16": torch.bfloat16, "fp16": torch.float16, "fp32": torch.float32}[text_encoder_dtype]
+        vae_dtype = {"bf16": torch.bfloat16, "fp16": torch.float16, "fp32": torch.float32}[vae_dtype]
+
         base_path = folder_paths.get_folder_paths("pyramidflow")[0]
         
         model_path = os.path.join(base_path, model.split("/")[-1])
@@ -70,7 +73,9 @@ class DownloadAndLoadPyramidFlowModel:
 
         model = PyramidDiTForVideoGeneration(
             model_path,
-            dtype,
+            model_dtype,
+            text_encoder_dtype,
+            vae_dtype,
             model_variant=variant,
         )
        
@@ -233,14 +238,13 @@ class PyramidFlowTextEncode:
 
     def sample(self, model, positive_prompt, negative_prompt, keep_model_loaded):
         mm.soft_empty_cache()
-
         device = mm.get_torch_device()
         offload_device = mm.unet_offload_device()
 
         autocastcondition = not model.dtype == torch.float32
         autocast_context = torch.autocast(mm.get_autocast_device(device)) if autocastcondition else nullcontext()
 
-        model.text_encoder.to(torch.float16).to(device)
+        model.text_encoder.to(device)
         with autocast_context:
             prompt_embeds, prompt_attention_mask, pooled_prompt_embeds = model.text_encoder(positive_prompt, device)
             negative_prompt_embeds, negative_prompt_attention_mask, pooled_negative_prompt_embeds = model.text_encoder(negative_prompt, device)
@@ -295,6 +299,7 @@ class PyramidFlowVAEDecode:
         self.vae_video_scale_factor = 1 / 3.0986
 
         self.vae.to(device)
+        latents = latents.to(self.vae.dtype)
         if latents.shape[2] == 1:
             latents = (latents / self.vae_scale_factor) + self.vae_shift_factor
         else:

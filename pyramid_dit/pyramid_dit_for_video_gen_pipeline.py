@@ -42,7 +42,7 @@ class PyramidDiTForVideoGeneration:
         The pyramid dit for both image and video generation, The running class wrapper
         This class is mainly for fixed unit implementation: 1 + n + n + n
     """
-    def __init__(self, model_path, model_dtype, use_gradient_checkpointing=False, return_log=True,
+    def __init__(self, model_path, model_dtype, text_encoder_dtype, vae_dtype, use_gradient_checkpointing=False, return_log=True,
         model_variant="diffusion_transformer_768p", timestep_shift=1.0, stage_range=[0, 1/3, 2/3, 1],
         sample_ratios=[1, 1, 1], scheduler_gamma=1/3, use_flash_attn=False, 
         load_text_encoder=True, load_vae=True, max_temporal_length=31, frame_per_unit=1, use_temporal_causal=True, 
@@ -69,13 +69,13 @@ class PyramidDiTForVideoGeneration:
 
         # The text encoder
         if load_text_encoder:
-            self.text_encoder = SD3TextEncoderWithMask(model_path, torch_dtype=torch_dtype)
+            self.text_encoder = SD3TextEncoderWithMask(model_path, torch_dtype=text_encoder_dtype)
         else:
             self.text_encoder = None
 
         # The base video vae decoder
         if load_vae:
-            self.vae = CausalVideoVAE.from_pretrained(os.path.join(model_path, 'causal_video_vae'), torch_dtype=torch_dtype, interpolate=False)
+            self.vae = CausalVideoVAE.from_pretrained(os.path.join(model_path, 'causal_video_vae'), torch_dtype=vae_dtype, interpolate=False)
             # Freeze vae
             for parameter in self.vae.parameters():
                 parameter.requires_grad = False
@@ -453,7 +453,6 @@ class PyramidDiTForVideoGeneration:
         min_guidance_scale: float = 2.0,
         use_linear_guidance: bool = False,
         alpha: float = 0.5,
-        negative_prompt: Optional[Union[str, List[str]]]="cartoon style, worst quality, low quality, blurry, absolute black, absolute white, low res, extra limbs, extra digits, misplaced objects, mutated anatomy, monochrome, horror",
         num_images_per_prompt: Optional[int] = 1,
         generator: Optional[Union[torch.Generator, List[torch.Generator]]] = None,
         output_type: Optional[str] = "pil",
@@ -510,6 +509,10 @@ class PyramidDiTForVideoGeneration:
             prompt_embeds = torch.cat([negative_prompt_embeds, positive_prompt_embeds], dim=0)
             pooled_prompt_embeds = torch.cat([negative_pooled_prompt_embeds, positive_pooled_prompt_embeds], dim=0)
             prompt_attention_mask = torch.cat([negative_prompt_attention_mask, positive_prompt_attention_mask], dim=0)
+
+        prompt_embeds = prompt_embeds.to(dtype)
+        pooled_prompt_embeds = pooled_prompt_embeds.to(dtype)
+        prompt_attention_mask = prompt_attention_mask.to(dtype)
 
         # Create the initial random noise
         num_channels_latents = self.dit.config.in_channels
@@ -624,39 +627,6 @@ class PyramidDiTForVideoGeneration:
             image = self.decode_latent(generated_latents, device)
 
         return image
-
-    def decode_latent(self, latents, device):
-        self.vae.to(device)
-        if latents.shape[2] == 1:
-            latents = (latents / self.vae_scale_factor) + self.vae_shift_factor
-        else:
-            latents[:, :, :1] = (latents[:, :, :1] / self.vae_scale_factor) + self.vae_shift_factor
-            latents[:, :, 1:] = (latents[:, :, 1:] / self.vae_video_scale_factor) + self.vae_video_shift_factor
-
-        image = self.vae.decode(latents, temporal_chunk=True, window_size=2, tile_sample_min_size=128).sample
-        self.vae.to('cpu')
-        image = image.float()
-        image = (image / 2 + 0.5).clamp(0, 1)
-        image = rearrange(image, "B C T H W -> (B T) C H W")
-        image = image.cpu().permute(0, 2, 3, 1).numpy()
-        image = self.numpy_to_pil(image)
-        return image
-
-    @staticmethod
-    def numpy_to_pil(images):
-        """
-        Convert a numpy image or a batch of images to a PIL image.
-        """
-        if images.ndim == 3:
-            images = images[None, ...]
-        images = (images * 255).round().astype("uint8")
-        if images.shape[-1] == 1:
-            # special case for grayscale (single channel) images
-            pil_images = [Image.fromarray(image.squeeze(), mode="L") for image in images]
-        else:
-            pil_images = [Image.fromarray(image) for image in images]
-
-        return pil_images
 
     @property
     def device(self):
