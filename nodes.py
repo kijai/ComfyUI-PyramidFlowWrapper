@@ -78,6 +78,7 @@ class DownloadAndLoadPyramidFlowModel:
             text_encoder_dtype,
             vae_dtype,
             model_variant=variant,
+            use_flash_attn=use_flash_attn,
         )
        
         # #fp8
