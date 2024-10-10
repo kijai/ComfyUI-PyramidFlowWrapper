@@ -115,8 +115,13 @@ class DownloadAndLoadPyramidFlowModel:
         #     fuse_qkv_projections=True if pab_config is None else False,
         #     )
 
-
-        return (model,)
+        pyramid_pipe = {
+            "model": model,
+            "dtype": model_dtype,
+            "text_encoder_dtype": text_encoder_dtype,
+            "vae_dtype": vae_dtype,
+        }
+        return (pyramid_pipe,)
 
     
 class CogVideoTextEncode:
@@ -170,9 +175,9 @@ class PyramidFlowSampler:
                 "keep_model_loaded": ("BOOLEAN", {"default": False}),
                
             },
-            # "optional": {
-            #     "samples": ("LATENT", ),
-            # }
+            "optional": {
+                "input_latent": ("LATENT", ),
+            }
         }
 
     RETURN_TYPES = ("PYRAMIDFLOWMODEL", "LATENT", )
@@ -180,38 +185,51 @@ class PyramidFlowSampler:
     FUNCTION = "sample"
     CATEGORY = "PyramidFlowWrapper"
 
-    def sample(self, model, steps, prompt_embeds, seed, height, width, video_steps, temp, guidance_scale, video_guidance_scale, keep_model_loaded):
+    def sample(self, model, steps, prompt_embeds, seed, height, width, video_steps, temp, guidance_scale, video_guidance_scale, 
+               keep_model_loaded, input_latent=None):
         mm.soft_empty_cache()
 
         device = mm.get_torch_device()
         offload_device = mm.unet_offload_device()
-        model.vae.enable_tiling()
 
         torch.manual_seed(seed)
         torch.cuda.manual_seed(seed)
 
-        autocastcondition = not model.dtype == torch.float32
+        autocastcondition = not model["model"].dtype == torch.float32
         autocast_context = torch.autocast(mm.get_autocast_device(device)) if autocastcondition else nullcontext()
 
-        #model.dit.to(device)
-        #model.vae.to(device)
-        #model.text_encoder.to(device)
-        with autocast_context:
-            latents = model.generate(
-                prompt_embeds_dict = prompt_embeds,
-                device=device,
-                num_inference_steps=[steps, steps, steps], #why's this a list
-                video_num_inference_steps=[video_steps, video_steps, video_steps], #why's this a list
-                height=height,
-                width=width,
-                temp=temp,
-                guidance_scale=guidance_scale,         # The guidance for the first frame
-                video_guidance_scale=video_guidance_scale,   # The guidance for the other video latent
-                output_type="latent",
-            )
+        if input_latent is None:
+            with autocast_context:
+                latents = model["model"].generate(
+                    prompt_embeds_dict = prompt_embeds,
+                    device=device,
+                    num_inference_steps=[steps, steps, steps], #why's this a list
+                    video_num_inference_steps=[video_steps, video_steps, video_steps], #why's this a list
+                    height=height,
+                    width=width,
+                    temp=temp,
+                    guidance_scale=guidance_scale,         # The guidance for the first frame
+                    video_guidance_scale=video_guidance_scale,   # The guidance for the other video latent
+                    output_type="latent",
+                )
+        else:
+            with autocast_context:
+                latents = model["model"].generate_i2v(
+                    prompt_embeds_dict = prompt_embeds,
+                    input_image_latent=input_latent,
+                    device=device,
+                    num_inference_steps=[steps, steps, steps], #why's this a list
+                    height=height,
+                    width=width,
+                    temp=temp,
+                    guidance_scale=guidance_scale,         # The guidance for the first frame
+                    video_guidance_scale=video_guidance_scale,   # The guidance for the other video latent
+                    output_type="latent",
+                )
+
 
         if not keep_model_loaded:
-            model.dit.to(offload_device)      
+            model["model"].dit.to(offload_device)      
 
         return (model, {"samples": latents},)
     
@@ -241,15 +259,17 @@ class PyramidFlowTextEncode:
         device = mm.get_torch_device()
         offload_device = mm.unet_offload_device()
 
-        autocastcondition = not model.dtype == torch.float32
+        text_encoder = model["model"].text_encoder
+
+        autocastcondition = not model["text_encoder_dtype"] == torch.float32
         autocast_context = torch.autocast(mm.get_autocast_device(device)) if autocastcondition else nullcontext()
 
-        model.text_encoder.to(device)
+        text_encoder.to(device)
         with autocast_context:
-            prompt_embeds, prompt_attention_mask, pooled_prompt_embeds = model.text_encoder(positive_prompt, device)
-            negative_prompt_embeds, negative_prompt_attention_mask, pooled_negative_prompt_embeds = model.text_encoder(negative_prompt, device)
+            prompt_embeds, prompt_attention_mask, pooled_prompt_embeds = text_encoder(positive_prompt, device)
+            negative_prompt_embeds, negative_prompt_attention_mask, pooled_negative_prompt_embeds = text_encoder(negative_prompt, device)
         if not keep_model_loaded:
-            model.text_encoder.to(offload_device)
+            text_encoder.to(offload_device)
 
         embeds = {
             "prompt_embeds": prompt_embeds,
@@ -262,6 +282,50 @@ class PyramidFlowTextEncode:
 
         return (embeds,)
     
+class PyramidFlowVAEEncode:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "model": ("PYRAMIDFLOWMODEL",),
+                "image": ("IMAGE",),               
+            },
+        }
+
+    RETURN_TYPES = ("LATENT", )
+    RETURN_NAMES = ("samples", )
+    FUNCTION = "sample"
+    CATEGORY = "PyramidFlowWrapper"
+
+    def sample(self, model, image):
+        mm.soft_empty_cache()
+
+        self.vae = model["model"].vae
+        dtype = model["vae_dtype"]
+
+        device = mm.get_torch_device()
+        offload_device = mm.unet_offload_device()
+        self.vae.enable_tiling()
+
+        # For the image latent
+        self.vae_shift_factor = 0.1490
+        self.vae_scale_factor = 1 / 1.8415
+
+        # For the video latent
+        self.vae_video_shift_factor = -0.2343
+        self.vae_video_scale_factor = 1 / 3.0986
+        input_image_tensor = image * 2 - 1
+        input_image_tensor = rearrange(input_image_tensor, 'b h w c -> b c h w')
+        input_image_tensor = input_image_tensor.unsqueeze(2)  # Add temporal dimension t=1
+        input_image_tensor = input_image_tensor.to(dtype=dtype, device=device)
+
+        self.vae.to(device)
+        input_image_latent = (self.vae.encode(input_image_tensor).latent_dist.sample() - self.vae_shift_factor) * self.vae_scale_factor  # [b c 1 h w]
+        self.vae.to(offload_device)
+
+        
+        return (input_image_latent,)
+    
 class PyramidFlowVAEDecode:
     @classmethod
     def INPUT_TYPES(s):
@@ -269,7 +333,7 @@ class PyramidFlowVAEDecode:
             "required": {
                 "model": ("PYRAMIDFLOWMODEL",),
                 "samples": ("LATENT",),
-                "tile_sample_min_size": ("INT", {"default": 128, "min": 64, "max": 512, "step": 8}),
+                "tile_sample_min_size": ("INT", {"default": 256, "min": 64, "max": 512, "step": 8}),
                 "window_size": ("INT", {"default": 2, "min": 1, "max": 4, "step": 1}),
                
             },
@@ -284,11 +348,11 @@ class PyramidFlowVAEDecode:
         mm.soft_empty_cache()
 
         latents = samples["samples"]
-        self.vae = model.vae
+        self.vae = model["model"].vae
 
         device = mm.get_torch_device()
         offload_device = mm.unet_offload_device()
-        model.vae.enable_tiling()
+        self.vae.enable_tiling()
 
         # For the image latent
         self.vae_shift_factor = 0.1490
@@ -324,6 +388,7 @@ NODE_CLASS_MAPPINGS = {
     "PyramidFlowSampler": PyramidFlowSampler,
     "PyramidFlowVAEDecode": PyramidFlowVAEDecode,
     "PyramidFlowTextEncode": PyramidFlowTextEncode,
+    "PyramidFlowVAEEncode": PyramidFlowVAEEncode,
    
 }
 NODE_DISPLAY_NAME_MAPPINGS = {
@@ -331,4 +396,5 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "PyramidFlowSampler": "PyramidFlow Sampler",
     "PyramidFlowVAEDecode" : "PyramidFlow VAE Decode",
     "PyramidFlowTextEncode": "PyramidFlow Text Encode",
+    "PyramidFlowVAEEncode": "PyramidFlow VAE Encode",
     }

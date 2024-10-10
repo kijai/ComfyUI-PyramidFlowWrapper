@@ -58,7 +58,7 @@ class PyramidDiTForVideoGeneration:
 
         dit_path = os.path.join(model_path, model_variant)
 
-            
+        
         self.dit = PyramidDiffusionMMDiT.from_pretrained(
             dit_path, torch_dtype=torch_dtype, 
             use_gradient_checkpointing=use_gradient_checkpointing, 
@@ -279,26 +279,24 @@ class PyramidDiTForVideoGeneration:
     @torch.no_grad()
     def generate_i2v(
         self,
-        #prompt: Union[str, List[str]] = '',
         prompt_embeds_dict: dict,
-        input_image: torch.Tensor,
+        device: torch.device,
+        input_image_latent: torch.Tensor,
         temp: int = 1,
         num_inference_steps: Optional[Union[int, List[int]]] = 28,
+        height: Optional[int] = None,
+        width: Optional[int] = None,
         guidance_scale: float = 7.0,
         video_guidance_scale: float = 4.0,
         min_guidance_scale: float = 2.0,
         use_linear_guidance: bool = False,
         alpha: float = 0.5,
-        negative_prompt: Optional[Union[str, List[str]]]="cartoon style, worst quality, low quality, blurry, absolute black, absolute white, low res, extra limbs, extra digits, misplaced objects, mutated anatomy, monochrome, horror",
         num_images_per_prompt: Optional[int] = 1,
         generator: Optional[Union[torch.Generator, List[torch.Generator]]] = None,
         output_type: Optional[str] = "pil",
     ):
-        device = self.device
+        #device = self.device
         dtype = self.dtype
-
-        width = input_image.width
-        height = input_image.height
 
         assert temp % self.frame_per_unit == 0, "The frames should be divided by frame_per unit"
         batch_size = 1
@@ -340,6 +338,11 @@ class PyramidDiTForVideoGeneration:
             pooled_prompt_embeds = torch.cat([negative_pooled_prompt_embeds, positive_pooled_prompt_embeds], dim=0)
             prompt_attention_mask = torch.cat([negative_prompt_attention_mask, positive_prompt_attention_mask], dim=0)
 
+        prompt_embeds = prompt_embeds.to(dtype)
+        pooled_prompt_embeds = pooled_prompt_embeds.to(dtype)
+        prompt_attention_mask = prompt_attention_mask.to(dtype)
+
+
         # Create the initial random noise
         num_channels_latents = self.dit.config.in_channels
         latents = self.prepare_latents(
@@ -366,16 +369,19 @@ class PyramidDiTForVideoGeneration:
         num_units = temp // self.frame_per_unit
         stages = self.stages
 
-        # encode the image latents
-        image_transform = transforms.Compose([
-            transforms.ToTensor(),
-            transforms.Normalize(mean=(0.5, 0.5, 0.5), std=(0.5, 0.5, 0.5)),
-        ])
-        input_image_tensor = image_transform(input_image).unsqueeze(0).unsqueeze(2)   # [b c 1 h w]
-        input_image_latent = (self.vae.encode(input_image_tensor.to(device)).latent_dist.sample() - self.vae_shift_factor) * self.vae_scale_factor  # [b c 1 h w]
-
+        # # encode the image latents
+        # image_transform = transforms.Compose([
+        #     transforms.ToTensor(),
+        #     transforms.Normalize(mean=(0.5, 0.5, 0.5), std=(0.5, 0.5, 0.5)),
+        # ])
+        #input_image_tensor = image_transform(input_image).unsqueeze(0).unsqueeze(2)   # [b c 1 h w]
+        
+        input_image_latent = input_image_latent.to(dtype).to(device)
         generated_latents_list = [input_image_latent]    # The generated results
         last_generated_latents = input_image_latent
+
+        self.dit.to(device)
+        comfy_pbar = ProgressBar(num_units)
 
         for unit_index in tqdm(range(1, num_units + 1)):
             if use_linear_guidance:
@@ -426,7 +432,7 @@ class PyramidDiTForVideoGeneration:
                 generator,
                 is_first_frame=False,
             )
-    
+            comfy_pbar.update(1)
             generated_latents_list.append(intermed_latents[-1])
             last_generated_latents = intermed_latents
 
@@ -634,6 +640,10 @@ class PyramidDiTForVideoGeneration:
 
     @property
     def dtype(self):
+        return next(self.dit.parameters()).dtype
+    
+    @property
+    def vae_dtype(self):
         return next(self.dit.parameters()).dtype
 
     @property
