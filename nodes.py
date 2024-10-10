@@ -37,7 +37,7 @@ class DownloadAndLoadPyramidFlowModel:
                 "text_encoder_dtype": (["fp16", "fp32", "bf16"],{"default": "bf16", }),
                 "vae_dtype": (["fp16", "fp32", "bf16"],{"default": "bf16", }),
                 "use_flash_attn": ("BOOLEAN", {"default": False}),
-                #"fp8_transformer": (['disabled', 'enabled', 'fastmode'], {"default": 'disabled', "tooltip": "enabled casts the transformer to torch.float8_e4m3fn, fastmode is only for latest nvidia GPUs"}),
+                "fp8_fastmode": ("BOOLEAN",{"default": False, "tooltip": "fastmode is only for latest nvidia GPUs"}),
                 #"compile": (["disabled","onediff","torch"], {"tooltip": "compile the model for faster inference, these are advanced options only available on Linux, see readme for more info"}),
             }
         }
@@ -47,7 +47,7 @@ class DownloadAndLoadPyramidFlowModel:
     FUNCTION = "loadmodel"
     CATEGORY = "PyramidFlowWrapper"
 
-    def loadmodel(self, model, variant, model_dtype, text_encoder_dtype, vae_dtype, use_flash_attn=False):
+    def loadmodel(self, model, variant, model_dtype, text_encoder_dtype, vae_dtype, fp8_fastmode, use_flash_attn=False):
 
         device = mm.get_torch_device()
         offload_device = mm.unet_offload_device()
@@ -79,26 +79,8 @@ class DownloadAndLoadPyramidFlowModel:
             vae_dtype,
             model_variant=variant,
             use_flash_attn=use_flash_attn,
-        )
-       
-        # #fp8
-        # if fp8_transformer == "enabled" or fp8_transformer == "fastmode":
-        #     if "2b" in model:
-        #         for name, param in transformer.named_parameters():
-        #             if name != "pos_embedding":
-        #                 param.data = param.data.to(torch.float8_e4m3fn)
-        #     elif "I2V" in model:
-        #         for name, param in transformer.named_parameters():
-        #             if "patch_embed" not in name:
-        #                 param.data = param.data.to(torch.float8_e4m3fn)
-        #     else:
-        #         transformer.to(torch.float8_e4m3fn)
-        
-        #     if fp8_transformer == "fastmode":
-        #         from .fp8_optimization import convert_fp8_linear
-        #         convert_fp8_linear(transformer, dtype)
-
-    
+            fp8_fastmode=fp8_fastmode,
+        )    
 
         # # compilation
         # if compile == "torch":

@@ -8,12 +8,9 @@ from einops import rearrange
 from diffusers.utils.torch_utils import randn_tensor
 
 import math
-import PIL
-from PIL import Image
 from tqdm import tqdm
-from torchvision import transforms
-from copy import deepcopy
-from typing import Any, Callable, Dict, List, Optional, Union
+
+from typing import List, Optional, Union
 from ..diffusion_schedulers import PyramidFlowMatchEulerDiscreteScheduler
 from ..video_vae.modeling_causal_vae import CausalVideoVAE
 
@@ -46,7 +43,7 @@ class PyramidDiTForVideoGeneration:
         model_variant="diffusion_transformer_768p", timestep_shift=1.0, stage_range=[0, 1/3, 2/3, 1],
         sample_ratios=[1, 1, 1], scheduler_gamma=1/3, use_flash_attn=False, 
         load_text_encoder=True, load_vae=True, max_temporal_length=31, frame_per_unit=1, use_temporal_causal=True, 
-        corrupt_ratio=1/3, interp_condition_pos=True, stages=[1, 2, 4], **kwargs,
+        corrupt_ratio=1/3, interp_condition_pos=True, stages=[1, 2, 4], fp8_fastmode=False, **kwargs,
     ):
         super().__init__()
 
@@ -77,6 +74,10 @@ class PyramidDiTForVideoGeneration:
             for name, param in self.dit.named_parameters():
                     if name != "pos_embedding":
                         param.data = param.data.to(model_dtype)
+
+        if fp8_fastmode == "fastmode":
+            from ..fp8_optimization import convert_fp8_linear
+            convert_fp8_linear(self.dit, torch.bfloat16)
 
         # The text encoder
         if load_text_encoder:

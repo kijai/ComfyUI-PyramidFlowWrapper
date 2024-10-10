@@ -1,7 +1,5 @@
 import functools
 import torch.nn as nn
-from einops import rearrange
-import torch
 
 
 def weights_init(m):

@@ -17,11 +17,9 @@ from typing import Optional, Tuple
 import numpy as np
 import torch
 import torch.nn as nn
-from einops import rearrange
 
 from diffusers.utils import BaseOutput, is_torch_version
 from diffusers.utils.torch_utils import randn_tensor
-from diffusers.models.attention_processor import SpatialNorm
 from .modeling_block import (
     UNetMidBlock2D,
     CausalUNetMidBlock2D,
@@ -29,12 +27,6 @@ from .modeling_block import (
     get_up_block,
     get_input_layer,
     get_output_layer,
-)
-from .modeling_resnet import (
-    Downsample2D, 
-    Upsample2D, 
-    TemporalDownsample2x, 
-    TemporalUpsample2x,
 )
 from .modeling_causal_conv import CausalConv3d, CausalGroupNorm
 

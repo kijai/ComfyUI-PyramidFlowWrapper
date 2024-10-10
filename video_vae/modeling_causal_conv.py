@@ -1,25 +1,18 @@
 from typing import Tuple, Union
 import torch
 import torch.nn as nn
-from torch.utils.checkpoint import checkpoint
 import torch.nn.functional as F
 from collections import deque
 from einops import rearrange
 from timm.models.layers import trunc_normal_
-#from IPython import embed
 from torch import Tensor
 
 from ..utils import (
     is_context_parallel_initialized,
-    get_context_parallel_group,
-    get_context_parallel_world_size,
     get_context_parallel_rank,
-    get_context_parallel_group_rank,
-)
 
+)
 from .context_parallel_ops import (
-    conv_scatter_to_context_parallel_region,
-    conv_gather_from_context_parallel_region,
     cp_pass_from_previous_rank,
 )
 

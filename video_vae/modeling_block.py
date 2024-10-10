@@ -13,9 +13,7 @@
 # limitations under the License.
 from typing import Any, Dict, Optional, Tuple, Union
 
-import numpy as np
 import torch
-import torch.nn.functional as F
 from torch import nn
 from einops import rearrange
 
