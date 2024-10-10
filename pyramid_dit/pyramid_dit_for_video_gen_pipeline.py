@@ -399,7 +399,7 @@ class PyramidDiTForVideoGeneration:
         
         input_image_latent = input_image_latent.to(dtype).to(device)
         generated_latents_list = [input_image_latent]    # The generated results
-        last_generated_latents = input_image_latent
+        #last_generated_latents = input_image_latent
 
         self.dit.to(device)
         comfy_pbar = ProgressBar(num_units)
@@ -456,7 +456,7 @@ class PyramidDiTForVideoGeneration:
             
             comfy_pbar.update(1)
             generated_latents_list.append(intermed_latents[-1])
-            last_generated_latents = intermed_latents
+            #last_generated_latents = intermed_latents
 
         generated_latents = torch.cat(generated_latents_list, dim=2)
 
@@ -570,7 +570,7 @@ class PyramidDiTForVideoGeneration:
         stages = self.stages
 
         generated_latents_list = []    # The generated results
-        last_generated_latents = None
+        #last_generated_latents = None
 
         self.dit.to(device)
         comfy_pbar = ProgressBar(num_units)
@@ -644,8 +644,7 @@ class PyramidDiTForVideoGeneration:
                 )
             comfy_pbar.update(1)
             generated_latents_list.append(intermed_latents[-1])
-            last_generated_latents = intermed_latents
-        self.dit.to('cpu')
+            #last_generated_latents = intermed_latents
 
         generated_latents = torch.cat(generated_latents_list, dim=2)
 
