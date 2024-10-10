@@ -327,8 +327,10 @@ class PyramidDiTForVideoGeneration:
         #     batch_size = len(prompt)
         #     prompt = [_ + ", hyper quality, Ultra HD, 8K" for _ in prompt]
 
-        # if isinstance(num_inference_steps, int):
-        #     num_inference_steps = [num_inference_steps] * len(self.stages)
+        if isinstance(num_inference_steps, int):
+            num_inference_steps = [num_inference_steps] * len(self.stages)
+        elif isinstance(num_inference_steps, list) and len(num_inference_steps) < len(self.stages):
+            num_inference_steps = (num_inference_steps * len(self.stages))[:len(self.stages)]
         
         # negative_prompt = negative_prompt or ""
 
@@ -496,9 +498,13 @@ class PyramidDiTForVideoGeneration:
 
         if isinstance(num_inference_steps, int):
             num_inference_steps = [num_inference_steps] * len(self.stages)
+        elif isinstance(num_inference_steps, list) and len(num_inference_steps) < len(self.stages):
+            num_inference_steps = (num_inference_steps * len(self.stages))[:len(self.stages)]
 
         if isinstance(video_num_inference_steps, int):
             video_num_inference_steps = [video_num_inference_steps] * len(self.stages)
+        elif isinstance(video_num_inference_steps, list) and len(video_num_inference_steps) < len(self.stages):
+            video_num_inference_steps = (video_num_inference_steps * len(self.stages))[:len(self.stages)]
 
         #negative_prompt = negative_prompt or ""
 

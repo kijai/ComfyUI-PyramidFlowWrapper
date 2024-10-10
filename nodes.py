@@ -150,8 +150,8 @@ class PyramidFlowSampler:
                 "prompt_embeds": ("PYRAMIDFLOWPROMPT",),
                 "width": ("INT", {"default": 640, "min": 128, "max": 2048, "step": 8}),
                 "height": ("INT", {"default": 384, "min": 128, "max": 2048, "step": 8}),
-                "first_frame_steps": ("INT", {"default": 20, "min": 1, "max": 200, "step": 1, "tooltip": "Number of steps for the first frame, no effect when using input_latent"}),
-                "video_steps": ("INT", {"default": 10, "min": 1, "max": 2048, "step": 1, "tooltip": "Number of steps for the video latents"}),
+                "first_frame_steps": ("STRING", {"default": "10, 10, 10", "tooltip": "Number of steps for each of the 3 stages, for the first frame, no effect when using input_latent"}),
+                "video_steps": ("STRING", {"default": "10, 10, 10", "tooltip": "Number of steps for each of the 3 stages, for the video latents"}),
                 "temp": ("INT", {"default": 8, "min": 1, "tooltip": "temp=16: 5s, temp=31: 10s"}),
                 "guidance_scale": ("FLOAT", {"default": 9.0, "min": 0.0, "max": 30.0, "step": 0.01, "tooltip": "The guidance for the first frame"}),
                 "video_guidance_scale": ("FLOAT", {"default": 5.0, "min": 0.0, "max": 30.0, "step": 0.01, "tooltip": "The guidance for the video latents"}),
@@ -180,6 +180,9 @@ class PyramidFlowSampler:
         torch.manual_seed(seed)
         torch.cuda.manual_seed(seed)
 
+        first_frame_steps = [int(num) for num in first_frame_steps.replace(" ", "").split(",")]
+        video_steps = [int(num) for num in video_steps.replace(" ", "").split(",")]
+
         autocast_dtype = dtype if dtype not in [torch.float8_e4m3fn, torch.float8_e5m2] else torch.bfloat16
         autocastcondition = not dtype == torch.float32
         autocast_context = torch.autocast(mm.get_autocast_device(device), dtype=autocast_dtype) if autocastcondition else nullcontext()
@@ -189,8 +192,8 @@ class PyramidFlowSampler:
                 latents = model["model"].generate(
                     prompt_embeds_dict = prompt_embeds,
                     device=device,
-                    num_inference_steps=[first_frame_steps, first_frame_steps, first_frame_steps],
-                    video_num_inference_steps=[video_steps, video_steps, video_steps], 
+                    num_inference_steps=first_frame_steps,
+                    video_num_inference_steps=video_steps,
                     height=height,
                     width=width,
                     temp=temp,
