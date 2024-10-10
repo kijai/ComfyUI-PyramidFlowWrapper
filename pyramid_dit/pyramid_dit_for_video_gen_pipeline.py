@@ -42,20 +42,15 @@ class PyramidDiTForVideoGeneration:
         The pyramid dit for both image and video generation, The running class wrapper
         This class is mainly for fixed unit implementation: 1 + n + n + n
     """
-    def __init__(self, model_path, model_dtype='bf16', use_gradient_checkpointing=False, return_log=True,
+    def __init__(self, model_path, model_dtype, use_gradient_checkpointing=False, return_log=True,
         model_variant="diffusion_transformer_768p", timestep_shift=1.0, stage_range=[0, 1/3, 2/3, 1],
-        sample_ratios=[1, 1, 1], scheduler_gamma=1/3, use_mixed_training=False, use_flash_attn=False, 
+        sample_ratios=[1, 1, 1], scheduler_gamma=1/3, use_flash_attn=False, 
         load_text_encoder=True, load_vae=True, max_temporal_length=31, frame_per_unit=1, use_temporal_causal=True, 
         corrupt_ratio=1/3, interp_condition_pos=True, stages=[1, 2, 4], **kwargs,
     ):
         super().__init__()
 
-        if model_dtype == 'bf16':
-            torch_dtype = torch.bfloat16
-        elif model_dtype == 'fp16':
-            torch_dtype = torch.float16
-        else:
-            torch_dtype = torch.float32
+        torch_dtype = model_dtype
 
         self.stages = stages
         self.sample_ratios = sample_ratios
@@ -63,24 +58,14 @@ class PyramidDiTForVideoGeneration:
 
         dit_path = os.path.join(model_path, model_variant)
 
-        # The dit
-        if use_mixed_training:
-            print("using mixed precision training, do not explicitly casting models")
-            self.dit = PyramidDiffusionMMDiT.from_pretrained(
-                dit_path, use_gradient_checkpointing=use_gradient_checkpointing, 
-                use_flash_attn=use_flash_attn, use_t5_mask=True, 
-                add_temp_pos_embed=True, temp_pos_embed_type='rope', 
-                use_temporal_causal=use_temporal_causal, interp_condition_pos=interp_condition_pos,
-            )
-        else:
-            print("using half precision")
-            self.dit = PyramidDiffusionMMDiT.from_pretrained(
-                dit_path, torch_dtype=torch_dtype, 
-                use_gradient_checkpointing=use_gradient_checkpointing, 
-                use_flash_attn=use_flash_attn, use_t5_mask=True,
-                add_temp_pos_embed=True, temp_pos_embed_type='rope', 
-                use_temporal_causal=use_temporal_causal, interp_condition_pos=interp_condition_pos,
-            )
+            
+        self.dit = PyramidDiffusionMMDiT.from_pretrained(
+            dit_path, torch_dtype=torch_dtype, 
+            use_gradient_checkpointing=use_gradient_checkpointing, 
+            use_flash_attn=use_flash_attn, use_t5_mask=True,
+            add_temp_pos_embed=True, temp_pos_embed_type='rope', 
+            use_temporal_causal=use_temporal_causal, interp_condition_pos=interp_condition_pos,
+        )
 
         # The text encoder
         if load_text_encoder:

@@ -236,12 +236,11 @@ class PyramidFlowTextEncode:
 
         device = mm.get_torch_device()
         offload_device = mm.unet_offload_device()
-        model.vae.enable_tiling()
 
         autocastcondition = not model.dtype == torch.float32
         autocast_context = torch.autocast(mm.get_autocast_device(device)) if autocastcondition else nullcontext()
 
-        model.text_encoder.to(device)
+        model.text_encoder.to(torch.float16).to(device)
         with autocast_context:
             prompt_embeds, prompt_attention_mask, pooled_prompt_embeds = model.text_encoder(positive_prompt, device)
             negative_prompt_embeds, negative_prompt_attention_mask, pooled_negative_prompt_embeds = model.text_encoder(negative_prompt, device)
