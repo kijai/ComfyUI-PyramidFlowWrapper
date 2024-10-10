@@ -301,13 +301,6 @@ class PyramidDiffusionMMDiT(ModelMixin, ConfigMixin):
                 text_ids = torch.zeros(pad_batch_size, encoder_attention_mask.shape[1], 1).to(device=device)    
                 input_ids_list = [torch.cat([text_ids, image_ids], dim=1) for image_ids in image_ids_list]
                 image_rotary_emb = [self.temp_rope_embed(input_ids) for input_ids in input_ids_list]  # [bs, seq_len, 1, head_dim // 2, 2, 2]
-
-                if is_sequence_parallel_initialized():
-                    sp_group = get_sequence_parallel_group()
-                    sp_group_size = get_sequence_parallel_world_size()
-                    image_rotary_emb = [all_to_all(x_.repeat(1, 1, sp_group_size, 1, 1, 1), sp_group, sp_group_size, scatter_dim=2, gather_dim=0) for x_ in image_rotary_emb]
-                    input_ids_list = [all_to_all(input_ids.repeat(1, 1, sp_group_size), sp_group, sp_group_size, scatter_dim=2, gather_dim=0) for input_ids in input_ids_list]
-
             else:
                 image_rotary_emb = None
 
@@ -425,59 +418,23 @@ class PyramidDiffusionMMDiT(ModelMixin, ConfigMixin):
         hidden_states, hidden_length, temps, heights, widths, trainable_token_list, encoder_attention_mask, \
                 attention_mask, image_rotary_emb = self.merge_input(sample, encoder_hidden_length, encoder_attention_mask)
         
-        # split the long latents if necessary
-        if is_sequence_parallel_initialized():
-            sp_group = get_sequence_parallel_group()
-            sp_group_size = get_sequence_parallel_world_size()
-            
-            # sync the input hidden states
-            batch_hidden_states = []
-            for i_p, hidden_states_ in enumerate(hidden_states):
-                assert hidden_states_.shape[1] % sp_group_size == 0, "The sequence length should be divided by sequence parallel size"
-                hidden_states_ = all_to_all(hidden_states_, sp_group, sp_group_size, scatter_dim=1, gather_dim=0)
-                hidden_length[i_p] = hidden_length[i_p] // sp_group_size
-                batch_hidden_states.append(hidden_states_)
-
-            # sync the encoder hidden states
-            hidden_states = torch.cat(batch_hidden_states, dim=1)
-            encoder_hidden_states = all_to_all(encoder_hidden_states, sp_group, sp_group_size, scatter_dim=1, gather_dim=0)
-            temb = all_to_all(temb.unsqueeze(1).repeat(1, sp_group_size, 1), sp_group, sp_group_size, scatter_dim=1, gather_dim=0)
-            temb = temb.squeeze(1)
-        else:
-            hidden_states = torch.cat(hidden_states, dim=1)
+        hidden_states = torch.cat(hidden_states, dim=1)
 
         # print(hidden_length)
         for i_b, block in enumerate(self.transformer_blocks):
-            if self.training and self.gradient_checkpointing and (i_b >= 2):
-                def create_custom_forward(module):
-                    def custom_forward(*inputs):
-                        return module(*inputs)
-
-                    return custom_forward
-
-                ckpt_kwargs: Dict[str, Any] = {"use_reentrant": False} if is_torch_version(">=", "1.11.0") else {}
-                encoder_hidden_states, hidden_states = torch.utils.checkpoint.checkpoint(
-                    create_custom_forward(block),
-                    hidden_states,
-                    encoder_hidden_states,
-                    encoder_attention_mask,
-                    temb,
-                    attention_mask,
-                    hidden_length,
-                    image_rotary_emb,
-                    **ckpt_kwargs,
-                )
-
-            else:
-                encoder_hidden_states, hidden_states = block(
-                    hidden_states=hidden_states, 
-                    encoder_hidden_states=encoder_hidden_states,
-                    encoder_attention_mask=encoder_attention_mask,
-                    temb=temb,
-                    attention_mask=attention_mask,
-                    hidden_length=hidden_length,
-                    image_rotary_emb=image_rotary_emb,
-                )
+            encoder_hidden_states, hidden_states = block(
+                hidden_states=hidden_states, 
+                encoder_hidden_states=encoder_hidden_states,
+                encoder_attention_mask=encoder_attention_mask,
+                temb=temb,
+                attention_mask=attention_mask,
+                hidden_length=hidden_length,
+                image_rotary_emb=image_rotary_emb,
+            )
+        
+        # nan_mask = torch.isnan(hidden_states)
+        # if torch.any(nan_mask):
+        #     raise ValueError("nan in hidden_states")
 
         hidden_states = self.norm_out(hidden_states, temb, hidden_length=hidden_length)
         hidden_states = self.proj_out(hidden_states)

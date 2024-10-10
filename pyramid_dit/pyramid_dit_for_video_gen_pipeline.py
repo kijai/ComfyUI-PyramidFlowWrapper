@@ -178,23 +178,23 @@ class PyramidDiTForVideoGeneration:
         latents = randn_tensor(shape, generator=generator, device=device, dtype=dtype)
         return latents
 
-    # def sample_block_noise(self, bs, ch, temp, height, width):
-    #     gamma = self.scheduler.config.gamma
-    #     dist = torch.distributions.multivariate_normal.MultivariateNormal(torch.zeros(4), torch.eye(4) * (1 + gamma) - torch.ones(4, 4) * gamma)
-    #     block_number = bs * ch * temp * (height // 2) * (width // 2)
-    #     noise = torch.stack([dist.sample() for _ in range(block_number)]) # [block number, 4]
-    #     noise = rearrange(noise, '(b c t h w) (p q) -> b c t (h p) (w q)',b=bs,c=ch,t=temp,h=height//2,w=width//2,p=2,q=2)
-    #     return noise
-    
     def sample_block_noise(self, bs, ch, temp, height, width):
         gamma = self.scheduler.config.gamma
-        epsilon = 1e-5  # Small value to ensure positive definiteness
-        covariance_matrix = torch.eye(4) * (1 + gamma) - torch.ones(4, 4) * gamma + torch.eye(4) * epsilon
-        dist = torch.distributions.multivariate_normal.MultivariateNormal(torch.zeros(4), covariance_matrix)
+        dist = torch.distributions.multivariate_normal.MultivariateNormal(torch.zeros(4), torch.eye(4) * (1 + gamma) - torch.ones(4, 4) * gamma)
         block_number = bs * ch * temp * (height // 2) * (width // 2)
-        noise = torch.stack([dist.sample() for _ in range(block_number)])  # [block number, 4]
-        noise = rearrange(noise, '(b c t h w) (p q) -> b c t (h p) (w q)', b=bs, c=ch, t=temp, h=height//2, w=width//2, p=2, q=2)
+        noise = torch.stack([dist.sample() for _ in range(block_number)]) # [block number, 4]
+        noise = rearrange(noise, '(b c t h w) (p q) -> b c t (h p) (w q)',b=bs,c=ch,t=temp,h=height//2,w=width//2,p=2,q=2)
         return noise
+    
+    # def sample_block_noise(self, bs, ch, temp, height, width):
+    #     gamma = self.scheduler.config.gamma
+    #     epsilon = 1e-5  # Small value to ensure positive definiteness
+    #     covariance_matrix = torch.eye(4) * (1 + gamma) - torch.ones(4, 4) * gamma + torch.eye(4) * epsilon
+    #     dist = torch.distributions.multivariate_normal.MultivariateNormal(torch.zeros(4), covariance_matrix)
+    #     block_number = bs * ch * temp * (height // 2) * (width // 2)
+    #     noise = torch.stack([dist.sample() for _ in range(block_number)])  # [block number, 4]
+    #     noise = rearrange(noise, '(b c t h w) (p q) -> b c t (h p) (w q)', b=bs, c=ch, t=temp, h=height//2, w=width//2, p=2, q=2)
+    #     return noise
 
     @torch.no_grad()
     def generate_one_unit(
@@ -255,6 +255,10 @@ class PyramidDiTForVideoGeneration:
                 )
 
                 noise_pred = noise_pred[0]
+
+                # nan_mask = torch.isnan(noise_pred)
+                # if torch.any(nan_mask):
+                #     raise ValueError("nan in hidden_states")
                 
                 # perform guidance
                 if self.do_classifier_free_guidance:
@@ -271,6 +275,9 @@ class PyramidDiTForVideoGeneration:
                     sample=latents,
                     generator=generator,
                 ).prev_sample
+            nan_mask = torch.isnan(latents)
+            if torch.any(nan_mask):
+                raise ValueError("nan in latents")
 
             intermed_latents.append(latents)
 
@@ -432,6 +439,7 @@ class PyramidDiTForVideoGeneration:
                 generator,
                 is_first_frame=False,
             )
+            
             comfy_pbar.update(1)
             generated_latents_list.append(intermed_latents[-1])
             last_generated_latents = intermed_latents
@@ -516,9 +524,9 @@ class PyramidDiTForVideoGeneration:
             pooled_prompt_embeds = torch.cat([negative_pooled_prompt_embeds, positive_pooled_prompt_embeds], dim=0)
             prompt_attention_mask = torch.cat([negative_prompt_attention_mask, positive_prompt_attention_mask], dim=0)
 
-        prompt_embeds = prompt_embeds.to(dtype)
-        pooled_prompt_embeds = pooled_prompt_embeds.to(dtype)
-        prompt_attention_mask = prompt_attention_mask.to(dtype)
+        # prompt_embeds = prompt_embeds.to(dtype)
+        # pooled_prompt_embeds = pooled_prompt_embeds.to(dtype)
+        # prompt_attention_mask = prompt_attention_mask.to(dtype)
 
         # Create the initial random noise
         num_channels_latents = self.dit.config.in_channels

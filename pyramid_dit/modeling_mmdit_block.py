@@ -476,15 +476,15 @@ class JointAttention(nn.Module):
 
         # print(f"Using flash-attention: {self.use_flash_attn}")
         if self.use_flash_attn:
-            if is_sequence_parallel_initialized():
-                self.var_flash_attn = SequenceParallelVarlenFlashSelfAttentionWithT5Mask()
-            else:
-                self.var_flash_attn = VarlenFlashSelfAttentionWithT5Mask()
+            #if is_sequence_parallel_initialized():
+            #    self.var_flash_attn = SequenceParallelVarlenFlashSelfAttentionWithT5Mask()
+            #else:
+            self.var_flash_attn = VarlenFlashSelfAttentionWithT5Mask()
         else:
-            if is_sequence_parallel_initialized():
-                self.var_len_attn = SequenceParallelVarlenSelfAttentionWithT5Mask()
-            else:
-                self.var_len_attn = VarlenSelfAttentionWithT5Mask()
+            #if is_sequence_parallel_initialized():
+                #self.var_len_attn = SequenceParallelVarlenSelfAttentionWithT5Mask()
+            #else:
+            self.var_len_attn = VarlenSelfAttentionWithT5Mask()
     
 
     def forward(

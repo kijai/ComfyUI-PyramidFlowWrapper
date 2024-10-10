@@ -196,15 +196,16 @@ class PyramidFlowSampler:
         torch.cuda.manual_seed(seed)
 
         autocastcondition = not model["model"].dtype == torch.float32
-        autocast_context = torch.autocast(mm.get_autocast_device(device)) if autocastcondition else nullcontext()
+        #autocastcondition = True
+        autocast_context = torch.autocast(mm.get_autocast_device(device), dtype=model["model"].dtype) if autocastcondition else nullcontext()
 
         if input_latent is None:
             with autocast_context:
                 latents = model["model"].generate(
                     prompt_embeds_dict = prompt_embeds,
                     device=device,
-                    num_inference_steps=[first_frame_steps, first_frame_steps, first_frame_steps], #why's this a list
-                    video_num_inference_steps=[video_steps, video_steps, video_steps], #why's this a list
+                    num_inference_steps=[first_frame_steps, first_frame_steps, first_frame_steps],
+                    video_num_inference_steps=[video_steps, video_steps, video_steps], 
                     height=height,
                     width=width,
                     temp=temp,
@@ -222,7 +223,6 @@ class PyramidFlowSampler:
                     height=height,
                     width=width,
                     temp=temp,
-                    guidance_scale=guidance_scale,         # The guidance for the first frame
                     video_guidance_scale=video_guidance_scale,   # The guidance for the other video latent
                     output_type="latent",
                 )

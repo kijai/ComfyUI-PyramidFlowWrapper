@@ -1,6 +1,5 @@
 import os
 import torch
-import torch.distributed as dist
 from .utils import is_dist_avail_and_initialized, get_rank
 
 
