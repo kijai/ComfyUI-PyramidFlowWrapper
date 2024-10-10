@@ -207,7 +207,7 @@ class PyramidFlowSampler:
                     prompt_embeds_dict = prompt_embeds,
                     input_image_latent=input_latent,
                     device=device,
-                    num_inference_steps=[video_steps, video_steps, video_steps], #why's this a list
+                    num_inference_steps=video_steps, #why's this a list
                     height=height,
                     width=width,
                     temp=temp,
