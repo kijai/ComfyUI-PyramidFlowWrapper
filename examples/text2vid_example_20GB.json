@@ -1,0 +1,385 @@
+{
+  "last_node_id": 23,
+  "last_link_id": 31,
+  "nodes": [
+    {
+      "id": 8,
+      "type": "PyramidFlowVAEDecode",
+      "pos": {
+        "0": 1555,
+        "1": 510
+      },
+      "size": {
+        "0": 315,
+        "1": 102
+      },
+      "flags": {},
+      "order": 3,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "model",
+          "type": "PYRAMIDFLOWMODEL",
+          "link": 8
+        },
+        {
+          "name": "samples",
+          "type": "LATENT",
+          "link": 9
+        }
+      ],
+      "outputs": [
+        {
+          "name": "images",
+          "type": "IMAGE",
+          "links": [
+            26
+          ],
+          "slot_index": 0
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "PyramidFlowVAEDecode"
+      },
+      "widgets_values": [
+        256,
+        2
+      ]
+    },
+    {
+      "id": 20,
+      "type": "GetImageSizeAndCount",
+      "pos": {
+        "0": 1564,
+        "1": 666
+      },
+      "size": [
+        257.25838733667274,
+        86
+      ],
+      "flags": {},
+      "order": 4,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "image",
+          "type": "IMAGE",
+          "link": 26
+        }
+      ],
+      "outputs": [
+        {
+          "name": "image",
+          "type": "IMAGE",
+          "links": [
+            27
+          ],
+          "slot_index": 0
+        },
+        {
+          "name": "1280 width",
+          "type": "INT",
+          "links": null
+        },
+        {
+          "name": "768 height",
+          "type": "INT",
+          "links": null
+        },
+        {
+          "name": "57 count",
+          "type": "INT",
+          "links": null
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "GetImageSizeAndCount"
+      },
+      "widgets_values": []
+    },
+    {
+      "id": 22,
+      "type": "PyramidFlowTextEncode",
+      "pos": {
+        "0": 551,
+        "1": 731
+      },
+      "size": {
+        "0": 403.6938171386719,
+        "1": 219.07676696777344
+      },
+      "flags": {},
+      "order": 1,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "model",
+          "type": "PYRAMIDFLOWMODEL",
+          "link": 30
+        }
+      ],
+      "outputs": [
+        {
+          "name": "prompt_embeds",
+          "type": "PYRAMIDFLOWPROMPT",
+          "links": [
+            31
+          ]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "PyramidFlowTextEncode"
+      },
+      "widgets_values": [
+        "Drone view of waves crashing against the rugged cliffs along Big Sur’s garay point beach. The crashing blue waters create white-tipped waves, while the golden light of the setting sun illuminates the rocky shore, hyper quality, Ultra HD, 8K",
+        "",
+        false
+      ]
+    },
+    {
+      "id": 9,
+      "type": "PyramidFlowSampler",
+      "pos": {
+        "0": 1077,
+        "1": 509
+      },
+      "size": {
+        "0": 411.5168151855469,
+        "1": 314
+      },
+      "flags": {},
+      "order": 2,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "model",
+          "type": "PYRAMIDFLOWMODEL",
+          "link": 7
+        },
+        {
+          "name": "prompt_embeds",
+          "type": "PYRAMIDFLOWPROMPT",
+          "link": 31
+        },
+        {
+          "name": "input_latent",
+          "type": "LATENT",
+          "link": null,
+          "shape": 7
+        }
+      ],
+      "outputs": [
+        {
+          "name": "model",
+          "type": "PYRAMIDFLOWMODEL",
+          "links": [
+            8
+          ]
+        },
+        {
+          "name": "samples",
+          "type": "LATENT",
+          "links": [
+            9
+          ],
+          "slot_index": 1
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "PyramidFlowSampler"
+      },
+      "widgets_values": [
+        1280,
+        768,
+        20,
+        10,
+        8,
+        7,
+        4,
+        44664248661391,
+        "fixed",
+        ""
+      ]
+    },
+    {
+      "id": 5,
+      "type": "DownloadAndLoadPyramidFlowModel",
+      "pos": {
+        "0": 564,
+        "1": 509
+      },
+      "size": {
+        "0": 361.3862609863281,
+        "1": 154
+      },
+      "flags": {},
+      "order": 0,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "pyramidflow_model",
+          "type": "PYRAMIDFLOWMODEL",
+          "links": [
+            7,
+            30
+          ],
+          "slot_index": 0
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "DownloadAndLoadPyramidFlowModel"
+      },
+      "widgets_values": [
+        "rain1011/pyramid-flow-sd3",
+        "diffusion_transformer_768p",
+        "bf16",
+        "fp16",
+        "bf16"
+      ]
+    },
+    {
+      "id": 14,
+      "type": "VHS_VideoCombine",
+      "pos": {
+        "0": 1917,
+        "1": 479
+      },
+      "size": [
+        1698.6201716509577,
+        1331.1721029905746
+      ],
+      "flags": {},
+      "order": 5,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "images",
+          "type": "IMAGE",
+          "link": 27
+        },
+        {
+          "name": "audio",
+          "type": "AUDIO",
+          "link": null,
+          "shape": 7
+        },
+        {
+          "name": "meta_batch",
+          "type": "VHS_BatchManager",
+          "link": null,
+          "shape": 7
+        },
+        {
+          "name": "vae",
+          "type": "VAE",
+          "link": null,
+          "shape": 7
+        }
+      ],
+      "outputs": [
+        {
+          "name": "Filenames",
+          "type": "VHS_FILENAMES",
+          "links": null
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "VHS_VideoCombine"
+      },
+      "widgets_values": {
+        "frame_rate": 16,
+        "loop_count": 0,
+        "filename_prefix": "PyramidFlow",
+        "format": "video/h264-mp4",
+        "pix_fmt": "yuv420p",
+        "crf": 19,
+        "save_metadata": true,
+        "pingpong": false,
+        "save_output": false,
+        "videopreview": {
+          "hidden": false,
+          "paused": false,
+          "params": {
+            "filename": "PyramidFlow_00001.mp4",
+            "subfolder": "",
+            "type": "temp",
+            "format": "video/h264-mp4",
+            "frame_rate": 16
+          },
+          "muted": false
+        }
+      }
+    }
+  ],
+  "links": [
+    [
+      7,
+      5,
+      0,
+      9,
+      0,
+      "PYRAMIDFLOWMODEL"
+    ],
+    [
+      8,
+      9,
+      0,
+      8,
+      0,
+      "PYRAMIDFLOWMODEL"
+    ],
+    [
+      9,
+      9,
+      1,
+      8,
+      1,
+      "LATENT"
+    ],
+    [
+      26,
+      8,
+      0,
+      20,
+      0,
+      "IMAGE"
+    ],
+    [
+      27,
+      20,
+      0,
+      14,
+      0,
+      "IMAGE"
+    ],
+    [
+      30,
+      5,
+      0,
+      22,
+      0,
+      "PYRAMIDFLOWMODEL"
+    ],
+    [
+      31,
+      22,
+      0,
+      9,
+      1,
+      "PYRAMIDFLOWPROMPT"
+    ]
+  ],
+  "groups": [],
+  "config": {},
+  "extra": {
+    "ds": {
+      "scale": 0.5644739300537773,
+      "offset": [
+        -47.76827969285131,
+        -150.5722569771329
+      ]
+    }
+  },
+  "version": 0.4
+}
