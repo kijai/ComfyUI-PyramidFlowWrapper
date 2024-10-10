@@ -36,6 +36,7 @@ class DownloadAndLoadPyramidFlowModel:
                 "model_dtype": (["fp16", "fp32", "bf16"],{"default": "bf16", }),
                 "text_encoder_dtype": (["fp16", "fp32", "bf16"],{"default": "bf16", }),
                 "vae_dtype": (["fp16", "fp32", "bf16"],{"default": "bf16", }),
+                "use_flash_attn": ("BOOLEAN", {"default": False}),
                 #"fp8_transformer": (['disabled', 'enabled', 'fastmode'], {"default": 'disabled', "tooltip": "enabled casts the transformer to torch.float8_e4m3fn, fastmode is only for latest nvidia GPUs"}),
                 #"compile": (["disabled","onediff","torch"], {"tooltip": "compile the model for faster inference, these are advanced options only available on Linux, see readme for more info"}),
             }
@@ -46,7 +47,7 @@ class DownloadAndLoadPyramidFlowModel:
     FUNCTION = "loadmodel"
     CATEGORY = "PyramidFlowWrapper"
 
-    def loadmodel(self, model, variant, model_dtype, text_encoder_dtype, vae_dtype):
+    def loadmodel(self, model, variant, model_dtype, text_encoder_dtype, vae_dtype, use_flash_attn=False):
 
         device = mm.get_torch_device()
         offload_device = mm.unet_offload_device()
@@ -196,7 +197,6 @@ class PyramidFlowSampler:
         torch.cuda.manual_seed(seed)
 
         autocastcondition = not model["model"].dtype == torch.float32
-        #autocastcondition = True
         autocast_context = torch.autocast(mm.get_autocast_device(device), dtype=model["model"].dtype) if autocastcondition else nullcontext()
 
         if input_latent is None:

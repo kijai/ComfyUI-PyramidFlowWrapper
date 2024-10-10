@@ -60,11 +60,15 @@ class PyramidDiTForVideoGeneration:
 
         
         self.dit = PyramidDiffusionMMDiT.from_pretrained(
-            dit_path, torch_dtype=torch_dtype, 
+            dit_path, 
+            torch_dtype=torch_dtype, 
             use_gradient_checkpointing=use_gradient_checkpointing, 
-            use_flash_attn=use_flash_attn, use_t5_mask=True,
-            add_temp_pos_embed=True, temp_pos_embed_type='rope', 
-            use_temporal_causal=use_temporal_causal, interp_condition_pos=interp_condition_pos,
+            use_flash_attn=use_flash_attn, 
+            use_t5_mask=True,
+            add_temp_pos_embed=True, 
+            temp_pos_embed_type='rope', 
+            use_temporal_causal=True if not use_flash_attn else False, 
+            interp_condition_pos=interp_condition_pos,
         )
 
         # The text encoder
