@@ -33,7 +33,7 @@ class DownloadAndLoadPyramidFlowModel:
 
             },
             "optional": {
-                "model_dtype": (["fp16", "fp32", "bf16"],{"default": "bf16", }),
+                "model_dtype": (["fp8_e4m3fn","fp8_e5m2","fp16", "fp32", "bf16"],{"default": "bf16", }),
                 "text_encoder_dtype": (["fp16", "fp32", "bf16"],{"default": "bf16", }),
                 "vae_dtype": (["fp16", "fp32", "bf16"],{"default": "bf16", }),
                 "use_flash_attn": ("BOOLEAN", {"default": False}),
@@ -53,7 +53,7 @@ class DownloadAndLoadPyramidFlowModel:
         offload_device = mm.unet_offload_device()
         mm.soft_empty_cache()
 
-        model_dtype = {"bf16": torch.bfloat16, "fp16": torch.float16, "fp32": torch.float32}[model_dtype]
+        model_dtype = {"bf16": torch.bfloat16, "fp16": torch.float16, "fp32": torch.float32, "fp8_e4m3fn": torch.float8_e4m3fn, "fp8_e5m2": torch.float8_e5m2}[model_dtype]
         text_encoder_dtype = {"bf16": torch.bfloat16, "fp16": torch.float16, "fp32": torch.float32}[text_encoder_dtype]
         vae_dtype = {"bf16": torch.bfloat16, "fp16": torch.float16, "fp32": torch.float32}[vae_dtype]
 
@@ -193,12 +193,15 @@ class PyramidFlowSampler:
 
         device = mm.get_torch_device()
         offload_device = mm.unet_offload_device()
+        dtype = model["dtype"]
 
         torch.manual_seed(seed)
         torch.cuda.manual_seed(seed)
 
-        autocastcondition = not model["model"].dtype == torch.float32
-        autocast_context = torch.autocast(mm.get_autocast_device(device), dtype=model["model"].dtype) if autocastcondition else nullcontext()
+        autocast_dtype = dtype if dtype not in [torch.float8_e4m3fn, torch.float8_e5m2] else torch.bfloat16
+        print(autocast_dtype)
+        autocastcondition = not dtype == torch.float32
+        autocast_context = torch.autocast(mm.get_autocast_device(device), dtype=autocast_dtype) if autocastcondition else nullcontext()
 
         if input_latent is None:
             with autocast_context:

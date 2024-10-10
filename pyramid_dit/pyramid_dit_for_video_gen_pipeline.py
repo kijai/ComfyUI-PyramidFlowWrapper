@@ -50,7 +50,10 @@ class PyramidDiTForVideoGeneration:
     ):
         super().__init__()
 
-        torch_dtype = model_dtype
+        if model_dtype in [torch.float8_e4m3fn, torch.float8_e4m3fn]:
+            self.dtype = torch.bfloat16
+        else:
+            self.dtype = model_dtype
 
         self.stages = stages
         self.sample_ratios = sample_ratios
@@ -61,7 +64,7 @@ class PyramidDiTForVideoGeneration:
         
         self.dit = PyramidDiffusionMMDiT.from_pretrained(
             dit_path, 
-            torch_dtype=torch_dtype, 
+            torch_dtype=self.dtype, 
             use_gradient_checkpointing=use_gradient_checkpointing, 
             use_flash_attn=use_flash_attn, 
             use_t5_mask=True,
@@ -70,6 +73,10 @@ class PyramidDiTForVideoGeneration:
             use_temporal_causal=True if not use_flash_attn else False, 
             interp_condition_pos=interp_condition_pos,
         )
+        if model_dtype in [torch.float8_e4m3fn, torch.float8_e4m3fn]:
+            for name, param in self.dit.named_parameters():
+                    if name != "pos_embedding":
+                        param.data = param.data.to(model_dtype)
 
         # The text encoder
         if load_text_encoder:
@@ -349,9 +356,9 @@ class PyramidDiTForVideoGeneration:
             pooled_prompt_embeds = torch.cat([negative_pooled_prompt_embeds, positive_pooled_prompt_embeds], dim=0)
             prompt_attention_mask = torch.cat([negative_prompt_attention_mask, positive_prompt_attention_mask], dim=0)
 
-        prompt_embeds = prompt_embeds.to(dtype)
-        pooled_prompt_embeds = pooled_prompt_embeds.to(dtype)
-        prompt_attention_mask = prompt_attention_mask.to(dtype)
+        # prompt_embeds = prompt_embeds.to(dtype)
+        # pooled_prompt_embeds = pooled_prompt_embeds.to(dtype)
+        # prompt_attention_mask = prompt_attention_mask.to(dtype)
 
 
         # Create the initial random noise
@@ -561,7 +568,6 @@ class PyramidDiTForVideoGeneration:
         generated_latents_list = []    # The generated results
         last_generated_latents = None
 
-        #self.dit.to(torch.float8_e4m3fn)
         self.dit.to(device)
         comfy_pbar = ProgressBar(num_units)
 
@@ -649,15 +655,7 @@ class PyramidDiTForVideoGeneration:
     @property
     def device(self):
         return next(self.dit.parameters()).device
-
-    @property
-    def dtype(self):
-        return next(self.dit.parameters()).dtype
     
-    @property
-    def vae_dtype(self):
-        return next(self.dit.parameters()).dtype
-
     @property
     def guidance_scale(self):
         return self._guidance_scale
