@@ -28,7 +28,7 @@ class DownloadAndLoadPyramidFlowModel:
                     ],
                 ),
                 "variant": (
-                    ["diffusion_transformer_768p", "diffusion_transformer_384p"],
+                    ["diffusion_transformer_384p", "diffusion_transformer_768p"],
                 ),
 
             },
@@ -36,7 +36,7 @@ class DownloadAndLoadPyramidFlowModel:
                 "precision": (["fp16", "fp32", "bf16"],
                     {"default": "bf16", "tooltip": "official recommendation is that 2b model should be fp16, 5b model should be bf16"}
                 ),
-                "fp8_transformer": (['disabled', 'enabled', 'fastmode'], {"default": 'disabled', "tooltip": "enabled casts the transformer to torch.float8_e4m3fn, fastmode is only for latest nvidia GPUs"}),
+                #"fp8_transformer": (['disabled', 'enabled', 'fastmode'], {"default": 'disabled', "tooltip": "enabled casts the transformer to torch.float8_e4m3fn, fastmode is only for latest nvidia GPUs"}),
                 #"compile": (["disabled","onediff","torch"], {"tooltip": "compile the model for faster inference, these are advanced options only available on Linux, see readme for more info"}),
             }
         }
@@ -46,7 +46,7 @@ class DownloadAndLoadPyramidFlowModel:
     FUNCTION = "loadmodel"
     CATEGORY = "PyramidFlowWrapper"
 
-    def loadmodel(self, model, variant, precision, fp8_transformer="disabled"):
+    def loadmodel(self, model, variant, precision):
 
         device = mm.get_torch_device()
         offload_device = mm.unet_offload_device()
@@ -153,11 +153,11 @@ class PyramidFlowSampler:
         return {
             "required": {
                 "model": ("PYRAMIDFLOWMODEL",),
-                "height": ("INT", {"default": 480, "min": 128, "max": 2048, "step": 8}),
-                "width": ("INT", {"default": 720, "min": 128, "max": 2048, "step": 8}),
+                "height": ("INT", {"default": 384, "min": 128, "max": 2048, "step": 8}),
+                "width": ("INT", {"default": 656, "min": 128, "max": 2048, "step": 8}),
                 "steps": ("INT", {"default": 20, "min": 1, "max": 200, "step": 1}),
                 "video_steps": ("INT", {"default": 10, "min": 5, "max": 2048, "step": 4}),
-                "temp": ("INT", {"default": 16, "min": 1}),
+                "temp": ("INT", {"default": 8, "min": 1}),
                 "guidance_scale": ("FLOAT", {"default": 9.0, "min": 0.0, "max": 30.0, "step": 0.01, "tooltip": "The guidance for the first frame"}),
                 "video_guidance_scale": ("FLOAT", {"default": 5.0, "min": 0.0, "max": 30.0, "step": 0.01, "tooltip": "The guidance for the other video latent"}),
                 "seed": ("INT", {"default": 0, "min": 0, "max": 0xffffffffffffffff}),
