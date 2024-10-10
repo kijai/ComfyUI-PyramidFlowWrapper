@@ -2,6 +2,8 @@
 
 # NOT FULLY FUNCTIONAL YET
 
+![image](https://github.com/user-attachments/assets/f863b596-6417-4d02-91ba-f9143f696d68)
+
 todo
 - refactor to use comfy text encoding instead
 - optimize memory use
