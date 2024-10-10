@@ -483,9 +483,6 @@ class PyramidDiTForVideoGeneration:
         output_type: Optional[str] = "pil",
         device: Optional[torch.device] = None,
     ):
-        #device = self.device
-        dtype = self.dtype
-
         assert (temp - 1) % self.frame_per_unit == 0, "The frames should be divided by frame_per unit"
 
         # if isinstance(prompt, str):
@@ -535,9 +532,9 @@ class PyramidDiTForVideoGeneration:
             pooled_prompt_embeds = torch.cat([negative_pooled_prompt_embeds, positive_pooled_prompt_embeds], dim=0)
             prompt_attention_mask = torch.cat([negative_prompt_attention_mask, positive_prompt_attention_mask], dim=0)
 
-        # prompt_embeds = prompt_embeds.to(dtype)
-        # pooled_prompt_embeds = pooled_prompt_embeds.to(dtype)
-        # prompt_attention_mask = prompt_attention_mask.to(dtype)
+        prompt_embeds = prompt_embeds.to(self.dtype)
+        pooled_prompt_embeds = pooled_prompt_embeds.to(self.dtype)
+        prompt_attention_mask = prompt_attention_mask.to(self.dtype)
 
         # Create the initial random noise
         num_channels_latents = self.dit.config.in_channels
@@ -547,7 +544,7 @@ class PyramidDiTForVideoGeneration:
             temp,
             height,
             width,
-            prompt_embeds.dtype,
+            self.dtype,
             device,
             generator,
         )
@@ -589,7 +586,7 @@ class PyramidDiTForVideoGeneration:
                     width,
                     1,
                     device,
-                    dtype,
+                    self.dtype,
                     generator,
                     is_first_frame=True,
                 )
@@ -634,7 +631,7 @@ class PyramidDiTForVideoGeneration:
                     width,
                     self.frame_per_unit,
                     device,
-                    dtype,
+                    self.dtype,
                     generator,
                     is_first_frame=False,
                 )

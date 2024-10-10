@@ -199,7 +199,6 @@ class PyramidFlowSampler:
         torch.cuda.manual_seed(seed)
 
         autocast_dtype = dtype if dtype not in [torch.float8_e4m3fn, torch.float8_e5m2] else torch.bfloat16
-        print(autocast_dtype)
         autocastcondition = not dtype == torch.float32
         autocast_context = torch.autocast(mm.get_autocast_device(device), dtype=autocast_dtype) if autocastcondition else nullcontext()
 
@@ -266,7 +265,7 @@ class PyramidFlowTextEncode:
         text_encoder = model["model"].text_encoder
 
         autocastcondition = not model["text_encoder_dtype"] == torch.float32
-        autocast_context = torch.autocast(mm.get_autocast_device(device)) if autocastcondition else nullcontext()
+        autocast_context = torch.autocast(mm.get_autocast_device(device), dtype=model["text_encoder_dtype"]) if autocastcondition else nullcontext()
 
         text_encoder.to(device)
         with autocast_context:
