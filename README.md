@@ -1,6 +1,8 @@
 # ComfyUI wrapper nodes for Pyramid-Flow
 
-![image](https://github.com/user-attachments/assets/f863b596-6417-4d02-91ba-f9143f696d68)
+
+https://github.com/user-attachments/assets/ab66fed8-4a91-4b45-9c08-77086257833f
+
 
 todo
 - refactor to use comfy text encoding instead
