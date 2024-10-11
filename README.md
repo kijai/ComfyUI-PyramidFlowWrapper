@@ -24,15 +24,15 @@ So that the directory structure is as follows:
 \ComfyUI\models\pyramidflow\pyramid-flow-sd3
 ├───causal_video_vae
 │       config.json
-│       diffusion_pytorch_model.bin
+│       diffusion_pytorch_model.safetensors
 │
 ├───diffusion_transformer_384p
 │       config.json
-│       diffusion_pytorch_model.bin
+│       diffusion_pytorch_model.safetensors
 │
 ├───diffusion_transformer_768p
 │       config.json
-│       diffusion_pytorch_model.bin
+│       diffusion_pytorch_model.safetensors
 │
 ├───text_encoder
 │       config.json
