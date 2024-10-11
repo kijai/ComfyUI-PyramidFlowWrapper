@@ -4,3 +4,5 @@ einops
 packaging
 sentencepiece
 timm>=0.6.12
+numpy<=1.26.4
+protobuf>=4.25.4
