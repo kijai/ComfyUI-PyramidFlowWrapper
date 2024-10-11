@@ -47,7 +47,7 @@ class PyramidDiTForVideoGeneration:
     ):
         super().__init__()
 
-        if model_dtype in [torch.float8_e4m3fn, torch.float8_e4m3fn]:
+        if model_dtype in [torch.float8_e4m3fn, torch.float8_e5m2]:
             self.dtype = torch.bfloat16
         else:
             self.dtype = model_dtype
@@ -70,12 +70,12 @@ class PyramidDiTForVideoGeneration:
             use_temporal_causal=True if not use_flash_attn else False, 
             interp_condition_pos=interp_condition_pos,
         )
-        if model_dtype in [torch.float8_e4m3fn, torch.float8_e4m3fn]:
+        if model_dtype in [torch.float8_e4m3fn, torch.float8_e5m2]:
             for name, param in self.dit.named_parameters():
                     if name != "pos_embedding":
                         param.data = param.data.to(model_dtype)
 
-        if model_dtype in [torch.float8_e4m3fn, torch.float8_e4m3fn] and fp8_fastmode:
+        if model_dtype in [torch.float8_e4m3fn, torch.float8_e5m2] and fp8_fastmode:
             from ..fp8_optimization import convert_fp8_linear
             convert_fp8_linear(self.dit, torch.bfloat16)
 
