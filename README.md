@@ -1,7 +1,7 @@
 # ComfyUI wrapper nodes for Pyramid-Flow
 
 
-https://github.com/user-attachments/assets/ab66fed8-4a91-4b45-9c08-77086257833f
+https://github.com/user-attachments/assets/9592bfed-9cf8-438a-b1e6-969d6b13ec12
 
 
 todo
