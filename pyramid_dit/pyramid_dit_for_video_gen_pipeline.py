@@ -311,7 +311,7 @@ class PyramidDiTForVideoGeneration:
         dtype = self.dtype
 
         assert temp % self.frame_per_unit == 0, "The frames should be divided by frame_per unit"
-        batch_size = 1
+        batch_size = prompt_embeds_dict['prompt_embeds'].shape[0]
         # if isinstance(prompt, str):
         #     batch_size = 1
         #     prompt = prompt + ", hyper quality, Ultra HD, 8K"   # adding this prompt to improve aesthetics
@@ -391,7 +391,8 @@ class PyramidDiTForVideoGeneration:
         #input_image_tensor = image_transform(input_image).unsqueeze(0).unsqueeze(2)   # [b c 1 h w]
         
         input_image_latent = input_image_latent.to(dtype).to(device)
-        generated_latents_list = [input_image_latent]    # The generated results
+        #generated_latents_list = [input_image_latent]    # The generated results
+        generated_latents_list = list(torch.unbind(input_image_latent, dim=0))
         #last_generated_latents = input_image_latent
 
         self.dit.to(device)
@@ -507,7 +508,7 @@ class PyramidDiTForVideoGeneration:
         # negative_prompt_embeds, negative_prompt_attention_mask, negative_pooled_prompt_embeds = self.text_encoder(negative_prompt, device)
         # self.text_encoder.to('cpu')
 
-        batch_size=1
+        batch_size = prompt_embeds_dict['prompt_embeds'].shape[0]
 
         if use_linear_guidance:
             max_guidance_scale = guidance_scale

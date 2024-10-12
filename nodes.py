@@ -36,7 +36,6 @@ class DownloadAndLoadPyramidFlowModel:
                 "model_dtype": (["fp8_e4m3fn","fp8_e5m2","fp16", "fp32", "bf16"],{"default": "bf16", }),
                 "text_encoder_dtype": (["fp16", "fp32", "bf16"],{"default": "bf16", }),
                 "vae_dtype": (["fp16", "fp32", "bf16"],{"default": "bf16", }),
-                "use_flash_attn": ("BOOLEAN", {"default": False}),
                 "fp8_fastmode": ("BOOLEAN",{"default": False, "tooltip": "fastmode is only for latest nvidia GPUs"}),
                 #"compile": (["disabled","onediff","torch"], {"tooltip": "compile the model for faster inference, these are advanced options only available on Linux, see readme for more info"}),
             }
@@ -47,7 +46,7 @@ class DownloadAndLoadPyramidFlowModel:
     FUNCTION = "loadmodel"
     CATEGORY = "PyramidFlowWrapper"
 
-    def loadmodel(self, model, variant, model_dtype, text_encoder_dtype, vae_dtype, fp8_fastmode, use_flash_attn=False):
+    def loadmodel(self, model, variant, model_dtype, text_encoder_dtype, vae_dtype, fp8_fastmode):
 
         device = mm.get_torch_device()
         offload_device = mm.unet_offload_device()
@@ -87,7 +86,6 @@ class DownloadAndLoadPyramidFlowModel:
             text_encoder_dtype,
             vae_dtype,
             model_variant=variant,
-            use_flash_attn=use_flash_attn,
             fp8_fastmode=fp8_fastmode,
         )    
 
@@ -241,9 +239,9 @@ class PyramidFlowTextEncode:
                 "keep_model_loaded": ("BOOLEAN", {"default": False}),
                
             },
-            # "optional": {
-            #     "samples": ("LATENT", ),
-            # }
+            "optional": {
+                "prev_prompt": ("PYRAMIDFLOWPROMPT", ),
+            }
         }
 
     RETURN_TYPES = ("PYRAMIDFLOWPROMPT", )
@@ -251,7 +249,7 @@ class PyramidFlowTextEncode:
     FUNCTION = "sample"
     CATEGORY = "PyramidFlowWrapper"
 
-    def sample(self, model, positive_prompt, negative_prompt, keep_model_loaded):
+    def sample(self, model, positive_prompt, negative_prompt, keep_model_loaded, prev_prompt=None):
         mm.soft_empty_cache()
         device = mm.get_torch_device()
         offload_device = mm.unet_offload_device()
@@ -268,6 +266,15 @@ class PyramidFlowTextEncode:
         if not keep_model_loaded:
             text_encoder.to(offload_device)
 
+        if prev_prompt is not None:
+            prompt_embeds = torch.cat((prev_prompt["prompt_embeds"], prompt_embeds), dim=0)
+            prompt_attention_mask = torch.cat((prev_prompt["attention_mask"], prompt_attention_mask), dim=0)
+            pooled_prompt_embeds = torch.cat((prev_prompt["pooled_embeds"], pooled_prompt_embeds), dim=0)
+
+            negative_prompt_embeds = torch.cat((prev_prompt["negative_prompt_embeds"], negative_prompt_embeds), dim=0)
+            negative_prompt_attention_mask = torch.cat((prev_prompt["negative_attention_mask"], negative_prompt_attention_mask), dim=0)
+            pooled_negative_prompt_embeds = torch.cat((prev_prompt["negative_pooled_embeds"], pooled_negative_prompt_embeds), dim=0)
+
         embeds = {
             "prompt_embeds": prompt_embeds,
             "attention_mask": prompt_attention_mask,
@@ -278,7 +285,70 @@ class PyramidFlowTextEncode:
         }
 
         return (embeds,)
-    
+
+#not functional yet, todo: figure out why the results are bad with it
+class PyramidFlowTextEncodeComfy:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {"required": {
+            "clip": ("CLIP",),
+            "positive_prompt": ("STRING", {"default": "hyper quality, Ultra HD, 8K", "multiline": True} ),
+            "negative_prompt": ("STRING", {"default": "", "multiline": True} ),
+            }
+        }
+
+    RETURN_TYPES = ("PYRAMIDFLOWPROMPT",)
+    RETURN_NAMES = ("prompt_embeds",)
+    FUNCTION = "process"
+    CATEGORY = "CogVideoWrapper"
+
+    def process(self, clip, positive_prompt, negative_prompt):
+        device = mm.get_torch_device()
+        offload_device = mm.unet_offload_device()
+        clip.cond_stage_model.reset_clip_options()
+        clip.tokenizer.t5xxl.pad_to_max_length = True
+        clip.tokenizer.t5xxl.truncation = True
+        clip.tokenizer.t5xxl.max_length = 128
+        clip.cond_stage_model.t5xxl.return_attention_masks = True
+        clip.cond_stage_model.t5_attention_mask = True
+
+        
+        clip.cond_stage_model.t5xxl.to(device)
+        tokens = clip.tokenize(positive_prompt.lower().strip(), return_word_ids=True)
+        
+        prompt_embeds, pooled_prompt_embeds, prompt_attention_mask = clip.cond_stage_model.encode_token_weights(tokens)
+        tokens = clip.tokenize(negative_prompt.lower().strip(), return_word_ids=True)
+        negative_prompt_embeds, pooled_negative_prompt_embeds, negative_prompt_attention_mask = clip.cond_stage_model.encode_token_weights(tokens)
+        clip.cond_stage_model.t5xxl.to(offload_device)
+
+        max_length = prompt_attention_mask["attention_mask"].shape[1]
+        prompt_embeds = prompt_embeds[:, :max_length, :]
+
+        print(prompt_embeds.shape)
+        print(prompt_attention_mask["attention_mask"].shape)
+
+        # If the sequence length is less than max_length, pad the embeddings
+        if prompt_embeds.shape[1] < max_length:
+            padding = torch.zeros((prompt_embeds.shape[0], max_length - prompt_embeds.shape[1], prompt_embeds.shape[2]), device=prompt_embeds.device)
+            prompt_embeds = torch.cat((prompt_embeds, padding), dim=1)
+
+        max_length = negative_prompt_attention_mask["attention_mask"].shape[1]
+        negative_prompt_embeds = negative_prompt_embeds[:, :max_length, :]
+        
+        if negative_prompt_embeds.shape[1] < max_length:
+            padding = torch.zeros((negative_prompt_embeds.shape[0], max_length - negative_prompt_embeds.shape[1], negative_prompt_embeds.shape[2]), device=negative_prompt_embeds.device)
+            negative_prompt_embeds = torch.cat((negative_prompt_embeds, padding), dim=1)
+        
+        embeds = {
+            "prompt_embeds": prompt_embeds.to(device),
+            "attention_mask": prompt_attention_mask["attention_mask"].to(device),
+            "pooled_embeds": pooled_prompt_embeds.to(device),
+            "negative_prompt_embeds": negative_prompt_embeds.to(device),
+            "negative_attention_mask": negative_prompt_attention_mask["attention_mask"].to(device),
+            "negative_pooled_embeds": pooled_negative_prompt_embeds.to(device)
+        }
+
+        return (embeds, )
 class PyramidFlowVAEEncode:
     @classmethod
     def INPUT_TYPES(s):
@@ -384,6 +454,7 @@ NODE_CLASS_MAPPINGS = {
     "PyramidFlowVAEDecode": PyramidFlowVAEDecode,
     "PyramidFlowTextEncode": PyramidFlowTextEncode,
     "PyramidFlowVAEEncode": PyramidFlowVAEEncode,
+    #"PyramidFlowTextEncodeComfy": PyramidFlowTextEncodeComfy,
    
 }
 NODE_DISPLAY_NAME_MAPPINGS = {
@@ -392,4 +463,5 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "PyramidFlowVAEDecode" : "PyramidFlow VAE Decode",
     "PyramidFlowTextEncode": "PyramidFlow Text Encode",
     "PyramidFlowVAEEncode": "PyramidFlow VAE Encode",
+    #"PyramidFlowTextEncodeComfy": "PyramidFlow Text Encode Comfy",
     }
