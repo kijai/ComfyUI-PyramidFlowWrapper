@@ -391,8 +391,7 @@ class PyramidDiTForVideoGeneration:
         #input_image_tensor = image_transform(input_image).unsqueeze(0).unsqueeze(2)   # [b c 1 h w]
         
         input_image_latent = input_image_latent.to(dtype).to(device)
-        #generated_latents_list = [input_image_latent]    # The generated results
-        generated_latents_list = list(torch.unbind(input_image_latent, dim=0))
+        generated_latents_list = [input_image_latent]    # The generated results
         #last_generated_latents = input_image_latent
 
         self.dit.to(device)
