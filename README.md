@@ -9,7 +9,9 @@ todo
 - optimize memory use
 
 Besides text encoder, which can peak at ~12GB VRAM use, this should run at 9-10GB VRAM when using 1280x768.
-With fp8 and 384p model it can fit under 6GB too.
+With fp8 and 384p model it can fit under 6GB too. Note that these tests were done on 4090, older cards may not support every optimization.
+
+Resolutions outside the model defaults perform poorly.
 
 Model loading has not been optimized at all yet, currently needs everything (choose either of the transformers) from here:
 
