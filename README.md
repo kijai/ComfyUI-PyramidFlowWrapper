@@ -1,4 +1,4 @@
-# ComfyUI wrapper nodes for Pyramid-Flow
+# ComfyUI wrapper nodes for [Pyramid-Flow](https://github.com/jy0205/Pyramid-Flow)
 
 
 https://github.com/user-attachments/assets/9592bfed-9cf8-438a-b1e6-969d6b13ec12
