@@ -47,6 +47,44 @@
       ]
     },
     {
+      "id": 5,
+      "type": "DownloadAndLoadPyramidFlowModel",
+      "pos": {
+        "0": 576,
+        "1": 496
+      },
+      "size": {
+        "0": 385.7839050292969,
+        "1": 202
+      },
+      "flags": {},
+      "order": 0,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "pyramidflow_model",
+          "type": "PYRAMIDFLOWMODEL",
+          "links": [
+            7,
+            30
+          ],
+          "slot_index": 0
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "DownloadAndLoadPyramidFlowModel"
+      },
+      "widgets_values": [
+        "rain1011/pyramid-flow-sd3",
+        "diffusion_transformer_768p",
+        "bf16",
+        "bf16",
+        "bf16",
+        false
+      ]
+    },
+    {
       "id": 22,
       "type": "PyramidFlowTextEncode",
       "pos": {
@@ -65,6 +103,12 @@
           "name": "model",
           "type": "PYRAMIDFLOWMODEL",
           "link": 30
+        },
+        {
+          "name": "prev_prompt",
+          "type": "PYRAMIDFLOWPROMPT",
+          "link": null,
+          "shape": 7
         }
       ],
       "outputs": [
@@ -81,7 +125,7 @@
       },
       "widgets_values": [
         "A campfire burning with flames and embers, gradually increasing in size and intensity before dying down towards the end, hyper quality, Ultra HD, 8K",
-        "",
+        "cartoon style, worst quality, low quality, blurry, absolute black, absolute white, low res, extra limbs, extra digits, misplaced objects, mutated anatomy, monochrome, horror",
         false
       ]
     },
@@ -143,50 +187,11 @@
         "20, 20, 20",
         "10, 10, 10",
         16,
-        7,
+        9,
         5,
         44664248661394,
         "fixed",
         ""
-      ]
-    },
-    {
-      "id": 5,
-      "type": "DownloadAndLoadPyramidFlowModel",
-      "pos": {
-        "0": 576,
-        "1": 496
-      },
-      "size": {
-        "0": 385.7839050292969,
-        "1": 202
-      },
-      "flags": {},
-      "order": 0,
-      "mode": 0,
-      "inputs": [],
-      "outputs": [
-        {
-          "name": "pyramidflow_model",
-          "type": "PYRAMIDFLOWMODEL",
-          "links": [
-            7,
-            30
-          ],
-          "slot_index": 0
-        }
-      ],
-      "properties": {
-        "Node name for S&R": "DownloadAndLoadPyramidFlowModel"
-      },
-      "widgets_values": [
-        "rain1011/pyramid-flow-sd3",
-        "diffusion_transformer_768p",
-        "bf16",
-        "bf16",
-        "bf16",
-        false,
-        false
       ]
     },
     {
@@ -239,7 +244,7 @@
         "Node name for S&R": "VHS_VideoCombine"
       },
       "widgets_values": {
-        "frame_rate": 16,
+        "frame_rate": 24,
         "loop_count": 0,
         "filename_prefix": "PyramidFlow",
         "format": "video/h264-mp4",
@@ -252,11 +257,11 @@
           "hidden": false,
           "paused": false,
           "params": {
-            "filename": "PyramidFlow_00022.mp4",
+            "filename": "PyramidFlow_00060.mp4",
             "subfolder": "",
             "type": "output",
             "format": "video/h264-mp4",
-            "frame_rate": 16
+            "frame_rate": 24
           },
           "muted": false
         }
@@ -317,10 +322,10 @@
   "config": {},
   "extra": {
     "ds": {
-      "scale": 0.6209213230591555,
+      "scale": 0.6830134553650706,
       "offset": [
-        -310.35152437401774,
-        -279.23206017956113
+        -385.88395293212943,
+        -310.74071933624276
       ]
     }
   },
