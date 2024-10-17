@@ -2,7 +2,8 @@ diffusers>=0.30.1
 accelerate>=0.30.0
 einops
 packaging
-sentencepiece
+sentencepiece>=0.2.0
 timm>=0.6.12
 numpy<=1.26.4
 protobuf>=4.25.4
+transformers>=4.44.2
