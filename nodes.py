@@ -25,6 +25,8 @@ class DownloadAndLoadPyramidFlowModel:
                 "model": (
                     [
                         "rain1011/pyramid-flow-sd3",
+                        "rain1011/pyramid-flow-miniflux"
+
                     ],
                 ),
                 "variant": (
@@ -79,10 +81,12 @@ class DownloadAndLoadPyramidFlowModel:
                     local_dir=model_path,
                     local_dir_use_symlinks=False,
                 )
-
+        model_name = "pyramid_flux" if "flux" in model else "pyramid_mmdit"
+        print(model_name)
         model = PyramidDiTForVideoGeneration(
             model_path,
             model_dtype,
+            model_name,
             text_encoder_dtype,
             vae_dtype,
             model_variant=variant,

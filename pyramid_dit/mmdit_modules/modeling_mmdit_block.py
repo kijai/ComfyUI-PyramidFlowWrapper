@@ -15,7 +15,7 @@ except:
     flash_attn_varlen_func = None
     print("Please install flash attention")
 
-from ..trainer_misc import (
+from ...trainer_misc import (
     is_sequence_parallel_initialized,
     get_sequence_parallel_group,
     get_sequence_parallel_world_size,

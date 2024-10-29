@@ -14,9 +14,16 @@ from typing import List, Optional, Union
 from ..diffusion_schedulers import PyramidFlowMatchEulerDiscreteScheduler
 from ..video_vae.modeling_causal_vae import CausalVideoVAE
 
-from .modeling_pyramid_mmdit import PyramidDiffusionMMDiT
-from .modeling_text_encoder import SD3TextEncoderWithMask
 
+from .mmdit_modules import (
+    PyramidDiffusionMMDiT,
+    SD3TextEncoderWithMask,
+)
+
+from .flux_modules import (
+    PyramidFluxTransformer,
+    FluxTextEncoderWithMask,
+)
 from comfy.utils import ProgressBar
 
 def compute_density_for_timestep_sampling(
@@ -34,12 +41,66 @@ def compute_density_for_timestep_sampling(
     return u
 
 
+def build_pyramid_dit(
+    model_name : str,
+    model_path : str,
+    torch_dtype,
+    use_flash_attn : bool,
+    #use_mixed_training: bool,
+    interp_condition_pos: bool = True,
+    use_gradient_checkpointing: bool = False,
+    use_temporal_causal: bool = True,
+    gradient_checkpointing_ratio: float = 0.6,
+):
+    #model_dtype = torch.float32 if use_mixed_training else torch_dtype
+    if model_name == "pyramid_flux":
+        dit = PyramidFluxTransformer.from_pretrained(
+            model_path, torch_dtype=torch_dtype,
+            use_gradient_checkpointing=use_gradient_checkpointing, 
+            gradient_checkpointing_ratio=gradient_checkpointing_ratio,
+            use_flash_attn=use_flash_attn, use_temporal_causal=use_temporal_causal,
+            interp_condition_pos=interp_condition_pos, axes_dims_rope=[16, 24, 24],
+        )
+    elif model_name == "pyramid_mmdit":
+        dit = PyramidDiffusionMMDiT.from_pretrained(
+            model_path, torch_dtype=torch_dtype, use_gradient_checkpointing=use_gradient_checkpointing, 
+            gradient_checkpointing_ratio=gradient_checkpointing_ratio,
+            use_flash_attn=use_flash_attn, use_t5_mask=True, 
+            add_temp_pos_embed=True, temp_pos_embed_type='rope', 
+            use_temporal_causal=use_temporal_causal, interp_condition_pos=interp_condition_pos,
+        )
+    else:
+        raise NotImplementedError(f"Unsupported DiT architecture, please set the model_name to `pyramid_flux` or `pyramid_mmdit`")
+
+    return dit
+
+
+def build_text_encoder(
+    model_name : str,
+    model_path : str,
+    torch_dtype,
+    load_text_encoder: bool = True,
+):
+    # The text encoder
+    if load_text_encoder:
+        if model_name == "pyramid_flux":
+            text_encoder = FluxTextEncoderWithMask(model_path, torch_dtype=torch_dtype)
+        elif model_name == "pyramid_mmdit":
+            text_encoder = SD3TextEncoderWithMask(model_path, torch_dtype=torch_dtype)
+        else:
+            raise NotImplementedError(f"Unsupported Text Encoder architecture, please set the model_name to `pyramid_flux` or `pyramid_mmdit`")
+    else:
+        text_encoder = None
+
+    return text_encoder
+
+
 class PyramidDiTForVideoGeneration:
     """
         The pyramid dit for both image and video generation, The running class wrapper
         This class is mainly for fixed unit implementation: 1 + n + n + n
     """
-    def __init__(self, model_path, model_dtype, text_encoder_dtype, vae_dtype, use_gradient_checkpointing=False, return_log=True,
+    def __init__(self, model_path, model_dtype, model_name, text_encoder_dtype, vae_dtype, use_gradient_checkpointing=False, return_log=True,
         model_variant="diffusion_transformer_768p", timestep_shift=1.0, stage_range=[0, 1/3, 2/3, 1],
         sample_ratios=[1, 1, 1], scheduler_gamma=1/3, use_flash_attn=False, 
         load_text_encoder=True, load_vae=True, max_temporal_length=31, frame_per_unit=1, use_temporal_causal=True, 
@@ -55,23 +116,22 @@ class PyramidDiTForVideoGeneration:
         self.stages = stages
         self.sample_ratios = sample_ratios
         self.corrupt_ratio = corrupt_ratio
+        self.model_name = model_name
 
        
 
         dit_path = os.path.join(model_path, model_variant)
 
         
-        self.dit = PyramidDiffusionMMDiT.from_pretrained(
-            dit_path, 
-            torch_dtype=self.dtype, 
-            use_gradient_checkpointing=use_gradient_checkpointing, 
+        # The dit
+        self.dit = build_pyramid_dit(
+            model_name, dit_path, self.dtype, 
             use_flash_attn=use_flash_attn, 
-            use_t5_mask=True,
-            add_temp_pos_embed=True, 
-            temp_pos_embed_type='rope', 
-            use_temporal_causal=True if not use_flash_attn else False, 
-            interp_condition_pos=interp_condition_pos,
-        )
+            interp_condition_pos=interp_condition_pos, use_gradient_checkpointing=use_gradient_checkpointing,
+            use_temporal_causal=use_temporal_causal,
+        )       
+
+
         if model_dtype in [torch.float8_e4m3fn, torch.float8_e5m2]:
             for name, param in self.dit.named_parameters():
                     if name != "pos_embedding":
@@ -82,10 +142,10 @@ class PyramidDiTForVideoGeneration:
             convert_fp8_linear(self.dit, torch.bfloat16)
 
         # The text encoder
-        if load_text_encoder:
-            self.text_encoder = SD3TextEncoderWithMask(model_path, torch_dtype=text_encoder_dtype)
-        else:
-            self.text_encoder = None
+        self.text_encoder = build_text_encoder(
+            model_name, model_path, text_encoder_dtype, load_text_encoder=load_text_encoder,
+        )
+        self.load_text_encoder = load_text_encoder
 
         # The base video vae decoder
         if load_vae:
@@ -280,9 +340,9 @@ class PyramidDiTForVideoGeneration:
                     sample=latents,
                     generator=generator,
                 ).prev_sample
-            nan_mask = torch.isnan(latents)
-            if torch.any(nan_mask):
-                raise ValueError("nan in latents")
+            #nan_mask = torch.isnan(latents)
+            #if torch.any(nan_mask):
+            #    raise ValueError("nan in latents")
 
             intermed_latents.append(latents)
 
@@ -358,7 +418,7 @@ class PyramidDiTForVideoGeneration:
 
 
         # Create the initial random noise
-        num_channels_latents = self.dit.config.in_channels
+        num_channels_latents = (self.dit.config.in_channels // 4) if self.model_name == "pyramid_flux" else  self.dit.config.in_channels
         latents = self.prepare_latents(
             batch_size * num_images_per_prompt,
             num_channels_latents,
@@ -537,7 +597,7 @@ class PyramidDiTForVideoGeneration:
         prompt_attention_mask = prompt_attention_mask.to(self.dtype)
 
         # Create the initial random noise
-        num_channels_latents = self.dit.config.in_channels
+        num_channels_latents = (self.dit.config.in_channels // 4) if self.model_name == "pyramid_flux" else  self.dit.config.in_channels
         latents = self.prepare_latents(
             batch_size * num_images_per_prompt,
             num_channels_latents,

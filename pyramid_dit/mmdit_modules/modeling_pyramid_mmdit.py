@@ -13,7 +13,7 @@ from .modeling_embedding import PatchEmbed3D, CombinedTimestepConditionEmbedding
 from .modeling_normalization import AdaLayerNormContinuous
 from .modeling_mmdit_block import JointTransformerBlock
 
-from ..trainer_misc import (
+from ...trainer_misc import (
     is_sequence_parallel_initialized,
     get_sequence_parallel_group,
     get_sequence_parallel_world_size,
