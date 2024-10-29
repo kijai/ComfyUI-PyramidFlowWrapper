@@ -69,12 +69,18 @@ class RMSNorm(nn.Module):
         hidden_states = hidden_states * torch.rsqrt(variance + self.eps)
 
         if self.weight is not None:
-            # convert into half-precision if necessary
-            if self.weight.dtype in [torch.float16, torch.bfloat16]:
-                hidden_states = hidden_states.to(self.weight.dtype)
-            hidden_states = hidden_states * self.weight
-        else:
-            hidden_states = hidden_states.to(input_dtype)
+            # Handle the case where self.weight is torch.float8_e4m3fn
+            if self.weight.dtype == torch.float8_e4m3fn:
+                weight = self.weight.to(torch.float32)
+            else:
+                weight = self.weight
+
+            # Convert hidden_states to the dtype of weight if necessary
+            if hidden_states.dtype != weight.dtype:
+                hidden_states = hidden_states.to(weight.dtype)
+            hidden_states = hidden_states * weight
+
+        hidden_states = hidden_states.to(input_dtype)
 
         return hidden_states
 
