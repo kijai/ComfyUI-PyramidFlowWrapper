@@ -68,7 +68,7 @@ class DownloadAndLoadPyramidFlowModel:
             log.info(f"Downloading model to: {model_path}")
             ignore_patterns = []
             if model == "rain1011/pyramid-flow-miniflux":
-                ignore_patterns.append["*text_encoder*", "*tokenizer*"]
+                ignore_patterns.extend["*text_encoder*", "*tokenizer*"]
             if variant == "diffusion_transformer_384p":
                 snapshot_download(
                     repo_id=model,
