@@ -117,7 +117,7 @@ class CausalVideoVAE(ModelMixin, ConfigMixin):
     ):
         super().__init__()
 
-        print(f"The latent dimmension channes is {encoder_out_channels}")
+        #print(f"The latent dimension channes is {encoder_out_channels}")
         # pass init params to Encoder
 
         self.encoder = CausalVaeEncoder(

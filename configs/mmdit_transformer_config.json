@@ -1,0 +1,20 @@
+{
+  "_class_name": "PyramidDiffusionMMDiT",
+  "_diffusers_version": "0.30.0",
+  "attention_head_dim": 64,
+  "caption_projection_dim": 1536,
+  "in_channels": 16,
+  "joint_attention_dim": 4096,
+  "max_num_frames": 200,
+  "num_attention_heads": 24,
+  "num_layers": 24,
+  "patch_size": 2,
+  "pooled_projection_dim": 2048,
+  "pos_embed_max_size": 192,
+  "pos_embed_type": "sincos",
+  "qk_norm": "rms_norm",
+  "sample_size": 128,
+  "use_flash_attn": false,
+  "use_gradient_checkpointing": false,
+  "use_temporal_causal": true
+}
