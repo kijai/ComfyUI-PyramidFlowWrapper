@@ -1,134 +1,7 @@
 {
-  "last_node_id": 27,
-  "last_link_id": 38,
+  "last_node_id": 39,
+  "last_link_id": 54,
   "nodes": [
-    {
-      "id": 8,
-      "type": "PyramidFlowVAEDecode",
-      "pos": {
-        "0": 1161,
-        "1": 873
-      },
-      "size": {
-        "0": 315,
-        "1": 102
-      },
-      "flags": {},
-      "order": 3,
-      "mode": 0,
-      "inputs": [
-        {
-          "name": "model",
-          "type": "PYRAMIDFLOWMODEL",
-          "link": 8
-        },
-        {
-          "name": "samples",
-          "type": "LATENT",
-          "link": 9
-        }
-      ],
-      "outputs": [
-        {
-          "name": "images",
-          "type": "IMAGE",
-          "links": [
-            38
-          ],
-          "slot_index": 0
-        }
-      ],
-      "properties": {
-        "Node name for S&R": "PyramidFlowVAEDecode"
-      },
-      "widgets_values": [
-        256,
-        2
-      ]
-    },
-    {
-      "id": 22,
-      "type": "PyramidFlowTextEncode",
-      "pos": {
-        "0": 567,
-        "1": 757
-      },
-      "size": {
-        "0": 434.50982666015625,
-        "1": 227.74803161621094
-      },
-      "flags": {},
-      "order": 1,
-      "mode": 0,
-      "inputs": [
-        {
-          "name": "model",
-          "type": "PYRAMIDFLOWMODEL",
-          "link": 30
-        },
-        {
-          "name": "prev_prompt",
-          "type": "PYRAMIDFLOWPROMPT",
-          "link": null,
-          "shape": 7
-        }
-      ],
-      "outputs": [
-        {
-          "name": "prompt_embeds",
-          "type": "PYRAMIDFLOWPROMPT",
-          "links": [
-            31
-          ]
-        }
-      ],
-      "properties": {
-        "Node name for S&R": "PyramidFlowTextEncode"
-      },
-      "widgets_values": [
-        "A campfire burning with flames and embers, gradually increasing in size and intensity before dying down towards the end, hyper quality, Ultra HD, 8K",
-        "cartoon style, worst quality, low quality, blurry, absolute black, absolute white, low res, extra limbs, extra digits, misplaced objects, mutated anatomy, monochrome, horror",
-        false
-      ]
-    },
-    {
-      "id": 5,
-      "type": "DownloadAndLoadPyramidFlowModel",
-      "pos": {
-        "0": 576,
-        "1": 496
-      },
-      "size": {
-        "0": 385.7839050292969,
-        "1": 202
-      },
-      "flags": {},
-      "order": 0,
-      "mode": 0,
-      "inputs": [],
-      "outputs": [
-        {
-          "name": "pyramidflow_model",
-          "type": "PYRAMIDFLOWMODEL",
-          "links": [
-            7,
-            30
-          ],
-          "slot_index": 0
-        }
-      ],
-      "properties": {
-        "Node name for S&R": "DownloadAndLoadPyramidFlowModel"
-      },
-      "widgets_values": [
-        "rain1011/pyramid-flow-miniflux",
-        "diffusion_transformer_384p",
-        "bf16",
-        "bf16",
-        "bf16",
-        false
-      ]
-    },
     {
       "id": 9,
       "type": "PyramidFlowSampler",
@@ -141,7 +14,7 @@
         "1": 314
       },
       "flags": {},
-      "order": 2,
+      "order": 4,
       "mode": 0,
       "inputs": [
         {
@@ -152,7 +25,7 @@
         {
           "name": "prompt_embeds",
           "type": "PYRAMIDFLOWPROMPT",
-          "link": 31
+          "link": 54
         },
         {
           "name": "input_latent",
@@ -189,30 +62,74 @@
         16,
         9,
         5,
-        44664248661394,
+        44664248661395,
         "fixed",
         ""
+      ]
+    },
+    {
+      "id": 8,
+      "type": "PyramidFlowVAEDecode",
+      "pos": {
+        "0": 1161,
+        "1": 873
+      },
+      "size": {
+        "0": 315,
+        "1": 102
+      },
+      "flags": {},
+      "order": 5,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "model",
+          "type": "PYRAMIDFLOWMODEL",
+          "link": 8
+        },
+        {
+          "name": "samples",
+          "type": "LATENT",
+          "link": 9
+        }
+      ],
+      "outputs": [
+        {
+          "name": "images",
+          "type": "IMAGE",
+          "links": [
+            53
+          ],
+          "slot_index": 0
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "PyramidFlowVAEDecode"
+      },
+      "widgets_values": [
+        256,
+        2
       ]
     },
     {
       "id": 14,
       "type": "VHS_VideoCombine",
       "pos": {
-        "0": 1534,
-        "1": 490
+        "0": 1541,
+        "1": 339
       },
       "size": [
         1698.6201171875,
         1331.1720703125
       ],
       "flags": {},
-      "order": 4,
+      "order": 6,
       "mode": 0,
       "inputs": [
         {
           "name": "images",
           "type": "IMAGE",
-          "link": 38
+          "link": 53
         },
         {
           "name": "audio",
@@ -257,7 +174,7 @@
           "hidden": false,
           "paused": false,
           "params": {
-            "filename": "PyramidFlow_00061.mp4",
+            "filename": "PyramidFlow_00089.mp4",
             "subfolder": "",
             "type": "output",
             "format": "video/h264-mp4",
@@ -266,6 +183,140 @@
           "muted": false
         }
       }
+    },
+    {
+      "id": 36,
+      "type": "PyramidFlowTextEncodeComfy",
+      "pos": {
+        "0": 597,
+        "1": 779
+      },
+      "size": {
+        "0": 400,
+        "1": 200
+      },
+      "flags": {},
+      "order": 3,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "clip",
+          "type": "CLIP",
+          "link": 47
+        }
+      ],
+      "outputs": [
+        {
+          "name": "prompt_embeds",
+          "type": "PYRAMIDFLOWPROMPT",
+          "links": [
+            54
+          ],
+          "slot_index": 0
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "PyramidFlowTextEncodeComfy"
+      },
+      "widgets_values": [
+        "A campfire burning with flames and embers, gradually increasing in size and intensity before dying down towards the end, hyper quality, Ultra HD, 8K",
+        "cartoon style, worst quality, low quality, blurry, absolute black, absolute white, low res, extra limbs, extra digits, misplaced objects, mutated anatomy, monochrome, horror",
+        true
+      ]
+    },
+    {
+      "id": 37,
+      "type": "DualCLIPLoader",
+      "pos": {
+        "0": 132,
+        "1": 780
+      },
+      "size": [
+        407.1675593807479,
+        106
+      ],
+      "flags": {},
+      "order": 0,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "CLIP",
+          "type": "CLIP",
+          "links": [
+            47
+          ],
+          "slot_index": 0
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "DualCLIPLoader"
+      },
+      "widgets_values": [
+        "clip_l.safetensors",
+        "t5\\t5xxl_fp16.safetensors",
+        "flux"
+      ]
+    },
+    {
+      "id": 39,
+      "type": "Note",
+      "pos": {
+        "0": 204,
+        "1": 946
+      },
+      "size": [
+        318.2556676190985,
+        66.48251931043842
+      ],
+      "flags": {},
+      "order": 1,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [],
+      "properties": {},
+      "widgets_values": [
+        "fp8 text encoder results are different from fp16!"
+      ],
+      "color": "#432",
+      "bgcolor": "#653"
+    },
+    {
+      "id": 5,
+      "type": "DownloadAndLoadPyramidFlowModel",
+      "pos": {
+        "0": 143,
+        "1": 489
+      },
+      "size": {
+        "0": 385.7839050292969,
+        "1": 202
+      },
+      "flags": {},
+      "order": 2,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "pyramidflow_model",
+          "type": "PYRAMIDFLOWMODEL",
+          "links": [
+            7
+          ],
+          "slot_index": 0
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "DownloadAndLoadPyramidFlowModel"
+      },
+      "widgets_values": [
+        "rain1011/pyramid-flow-miniflux",
+        "diffusion_transformer_384p",
+        "bf16",
+        "bf16",
+        "bf16",
+        false
+      ]
     }
   ],
   "links": [
@@ -294,38 +345,38 @@
       "LATENT"
     ],
     [
-      30,
-      5,
+      47,
+      37,
       0,
-      22,
+      36,
       0,
-      "PYRAMIDFLOWMODEL"
+      "CLIP"
     ],
     [
-      31,
-      22,
-      0,
-      9,
-      1,
-      "PYRAMIDFLOWPROMPT"
-    ],
-    [
-      38,
+      53,
       8,
       0,
       14,
       0,
       "IMAGE"
+    ],
+    [
+      54,
+      36,
+      0,
+      9,
+      1,
+      "PYRAMIDFLOWPROMPT"
     ]
   ],
   "groups": [],
   "config": {},
   "extra": {
     "ds": {
-      "scale": 0.6934334949442617,
+      "scale": 0.6303940863129696,
       "offset": [
-        -267.34972182737584,
-        -351.34162515690946
+        274.1852517840429,
+        -178.2662230728557
       ]
     }
   },

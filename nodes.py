@@ -64,9 +64,12 @@ class DownloadAndLoadPyramidFlowModel:
         variant_path = os.path.join(model_path, variant)
         
         if not os.path.exists(variant_path):
+            from huggingface_hub import snapshot_download
             log.info(f"Downloading model to: {model_path}")
+            ignore_patterns = []
+            if model == "rain1011/pyramid-flow-miniflux":
+                ignore_patterns.append["*text_encoder*", "*tokenizer*"]
             if variant == "diffusion_transformer_384p":
-                from huggingface_hub import snapshot_download
                 snapshot_download(
                     repo_id=model,
                     ignore_patterns=["*diffusion_transformer_768p*"],
@@ -74,7 +77,6 @@ class DownloadAndLoadPyramidFlowModel:
                     local_dir_use_symlinks=False,
                 )
             elif variant == "diffusion_transformer_768p":
-                from huggingface_hub import snapshot_download
                 snapshot_download(
                     repo_id=model,
                     ignore_patterns=["*diffusion_transformer_384p*"],
@@ -298,6 +300,7 @@ class PyramidFlowTextEncodeComfy:
             "clip": ("CLIP",),
             "positive_prompt": ("STRING", {"default": "hyper quality, Ultra HD, 8K", "multiline": True} ),
             "negative_prompt": ("STRING", {"default": "", "multiline": True} ),
+            "force_offload": ("BOOLEAN", {"default": True}),
             }
         }
 
@@ -306,42 +309,36 @@ class PyramidFlowTextEncodeComfy:
     FUNCTION = "process"
     CATEGORY = "CogVideoWrapper"
 
-    def process(self, clip, positive_prompt, negative_prompt):
+    def process(self, clip, positive_prompt, negative_prompt, force_offload=True):
+        max_lenght = 128
         device = mm.get_torch_device()
         offload_device = mm.unet_offload_device()
         clip.cond_stage_model.reset_clip_options()
         clip.tokenizer.t5xxl.pad_to_max_length = True
         clip.tokenizer.t5xxl.truncation = True
-        clip.tokenizer.t5xxl.max_length = 128
+        clip.tokenizer.t5xxl.max_length = max_lenght
+        clip.tokenizer.t5xxl.min_length = 1
+        clip.tokenizer.clip_l.max_length = 77
         clip.cond_stage_model.t5xxl.return_attention_masks = True
+        clip.cond_stage_model.t5xxl.enable_attention_masks = True
         clip.cond_stage_model.t5_attention_mask = True
 
-        
-        clip.cond_stage_model.t5xxl.to(device)
-        tokens = clip.tokenize(positive_prompt.lower().strip(), return_word_ids=True)
-        
-        prompt_embeds, pooled_prompt_embeds, prompt_attention_mask = clip.cond_stage_model.encode_token_weights(tokens)
-        tokens = clip.tokenize(negative_prompt.lower().strip(), return_word_ids=True)
-        negative_prompt_embeds, pooled_negative_prompt_embeds, negative_prompt_attention_mask = clip.cond_stage_model.encode_token_weights(tokens)
-        clip.cond_stage_model.t5xxl.to(offload_device)
+        clip.cond_stage_model.to(device)#.to(torch.bfloat16)
+        clip.cond_stage_model.clip_l.to(device)
 
-        max_length = prompt_attention_mask["attention_mask"].shape[1]
-        prompt_embeds = prompt_embeds[:, :max_length, :]
+        #positive
+        tokens = clip.tokenizer.t5xxl.tokenize_with_weights(positive_prompt, return_word_ids=False)
+        prompt_embeds, _, prompt_attention_mask = clip.cond_stage_model.t5xxl.encode_token_weights(tokens)
+        tokens = clip.tokenizer.clip_l.tokenize_with_weights(positive_prompt, return_word_ids=False)
+        _, pooled_prompt_embeds, = clip.cond_stage_model.clip_l.encode_token_weights(tokens)
+        #negative
+        tokens = clip.tokenizer.t5xxl.tokenize_with_weights(negative_prompt, return_word_ids=False)
+        negative_prompt_embeds, _, negative_prompt_attention_mask = clip.cond_stage_model.t5xxl.encode_token_weights(tokens)
+        tokens = clip.tokenizer.clip_l.tokenize_with_weights(negative_prompt, return_word_ids=False)
+        _, pooled_negative_prompt_embeds, = clip.cond_stage_model.clip_l.encode_token_weights(tokens)
 
-        print(prompt_embeds.shape)
-        print(prompt_attention_mask["attention_mask"].shape)
-
-        # If the sequence length is less than max_length, pad the embeddings
-        if prompt_embeds.shape[1] < max_length:
-            padding = torch.zeros((prompt_embeds.shape[0], max_length - prompt_embeds.shape[1], prompt_embeds.shape[2]), device=prompt_embeds.device)
-            prompt_embeds = torch.cat((prompt_embeds, padding), dim=1)
-
-        max_length = negative_prompt_attention_mask["attention_mask"].shape[1]
-        negative_prompt_embeds = negative_prompt_embeds[:, :max_length, :]
-        
-        if negative_prompt_embeds.shape[1] < max_length:
-            padding = torch.zeros((negative_prompt_embeds.shape[0], max_length - negative_prompt_embeds.shape[1], negative_prompt_embeds.shape[2]), device=negative_prompt_embeds.device)
-            negative_prompt_embeds = torch.cat((negative_prompt_embeds, padding), dim=1)
+        if force_offload:
+            clip.cond_stage_model.to(offload_device)
         
         embeds = {
             "prompt_embeds": prompt_embeds.to(device),
@@ -349,7 +346,7 @@ class PyramidFlowTextEncodeComfy:
             "pooled_embeds": pooled_prompt_embeds.to(device),
             "negative_prompt_embeds": negative_prompt_embeds.to(device),
             "negative_attention_mask": negative_prompt_attention_mask["attention_mask"].to(device),
-            "negative_pooled_embeds": pooled_negative_prompt_embeds.to(device)
+            "negative_pooled_embeds": pooled_negative_prompt_embeds.to(device),
         }
 
         return (embeds, )
@@ -458,7 +455,7 @@ NODE_CLASS_MAPPINGS = {
     "PyramidFlowVAEDecode": PyramidFlowVAEDecode,
     "PyramidFlowTextEncode": PyramidFlowTextEncode,
     "PyramidFlowVAEEncode": PyramidFlowVAEEncode,
-    #"PyramidFlowTextEncodeComfy": PyramidFlowTextEncodeComfy,
+    "PyramidFlowTextEncodeComfy": PyramidFlowTextEncodeComfy,
    
 }
 NODE_DISPLAY_NAME_MAPPINGS = {
@@ -467,5 +464,5 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "PyramidFlowVAEDecode" : "PyramidFlow VAE Decode",
     "PyramidFlowTextEncode": "PyramidFlow Text Encode",
     "PyramidFlowVAEEncode": "PyramidFlow VAE Encode",
-    #"PyramidFlowTextEncodeComfy": "PyramidFlow Text Encode Comfy",
+    "PyramidFlowTextEncodeComfy": "PyramidFlow Text Encode Comfy",
     }

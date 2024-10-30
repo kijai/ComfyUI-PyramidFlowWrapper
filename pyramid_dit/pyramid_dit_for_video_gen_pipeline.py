@@ -131,11 +131,10 @@ class PyramidDiTForVideoGeneration:
             use_temporal_causal=use_temporal_causal,
         )       
 
-
         if model_dtype in [torch.float8_e4m3fn, torch.float8_e5m2]:
             for name, param in self.dit.named_parameters():
-                    if name != "pos_embedding":
-                        param.data = param.data.to(model_dtype)
+                if name != "pos_embedding":
+                    param.data = param.data.to(model_dtype)
 
         if model_dtype in [torch.float8_e4m3fn, torch.float8_e5m2] and fp8_fastmode:
             from ..fp8_optimization import convert_fp8_linear

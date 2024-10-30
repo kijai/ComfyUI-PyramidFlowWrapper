@@ -124,6 +124,13 @@ class FluxTextEncoderWithMask(nn.Module):
             num_images_per_prompt=num_images_per_prompt,
             device=device,
         )
+        print("prompt_embeds_shape: ",prompt_embeds.shape)
+        print("pooled_prompt_embeds_shape: ",pooled_prompt_embeds.shape)
+        print("prompt_attention_mask_shape: ",prompt_attention_mask.shape)
+        # prompt_embeds_shape:  torch.Size([1, 128, 4096])
+        # pooled_prompt_embeds_shape:  torch.Size([1, 768])
+        # prompt_attention_mask_shape:  torch.Size([1, 128])
+        
 
         return prompt_embeds, prompt_attention_mask, pooled_prompt_embeds
 
