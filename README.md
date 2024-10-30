@@ -3,7 +3,8 @@
 ## UPDATE
 As the first Flux version is out, I'm dropping the SD3 support and refactored the whole thing, if you still want to use the old nodes they are archived in the legacy branch
 
-The fluxmini version can run with 7GB VRAM, currently it only supports 5 second videos (temp 16)
+The fluxmini version can run with 7GB VRAM, currently it only supports 5 second videos (temp 16). 
+Fp8 severely reduces quality and is not recommended, only use it if you must.
 
 Download models from:
 
