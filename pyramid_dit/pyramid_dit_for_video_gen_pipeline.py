@@ -9,7 +9,7 @@ from tqdm import tqdm
 
 from typing import List, Optional, Union
 from ..diffusion_schedulers import PyramidFlowMatchEulerDiscreteScheduler
-
+from accelerate import cpu_offload
 from comfy.utils import ProgressBar
 
 def compute_density_for_timestep_sampling(
@@ -36,6 +36,7 @@ class PyramidDiTForVideoGeneration:
             transformer, 
             model_dtype, 
             model_name, 
+            main_device,
             return_log=True, 
             timestep_shift=1.0, 
             stage_range=[0, 1/3, 2/3, 1],
@@ -52,6 +53,9 @@ class PyramidDiTForVideoGeneration:
         super().__init__()
 
         self.dit = transformer
+        self.device = main_device
+        self.sequential_offload_enabled = False
+
         if model_dtype in [torch.float8_e4m3fn, torch.float8_e5m2]:
             self.dtype = torch.bfloat16
         else:
@@ -109,6 +113,14 @@ class PyramidDiTForVideoGeneration:
 
         vae_latent_list = list(reversed(vae_latent_list))
         return vae_latent_list
+
+    def _enable_sequential_cpu_offload(self, model, device):
+        self.sequential_offload_enabled = True
+        offload_buffers = len(model._parameters) > 0
+        cpu_offload(model, device, offload_buffers=offload_buffers)
+    
+    def enable_sequential_cpu_offload(self):
+        self._enable_sequential_cpu_offload(self.dit, device=self.device)
 
     def prepare_latents(
         self,
@@ -330,7 +342,8 @@ class PyramidDiTForVideoGeneration:
         generated_latents_list = [input_image_latent]    # The generated results
         #last_generated_latents = input_image_latent
 
-        self.dit.to(device)
+        if not self.sequential_offload_enabled:
+            self.dit.to(device)
         comfy_pbar = ProgressBar(num_units)
 
         for unit_index in tqdm(range(1, num_units + 1)):
@@ -500,8 +513,8 @@ class PyramidDiTForVideoGeneration:
 
         generated_latents_list = []    # The generated results
         #last_generated_latents = None
-
-        self.dit.to(device)
+        if not self.sequential_offload_enabled:
+            self.dit.to(device)
         comfy_pbar = ProgressBar(num_units)
 
         for unit_index in tqdm(range(num_units)):
@@ -584,9 +597,9 @@ class PyramidDiTForVideoGeneration:
 
         return image
 
-    @property
-    def device(self):
-        return next(self.dit.parameters()).device
+    # @property
+    # def device(self):
+    #     return next(self.dit.parameters()).device
     
     @property
     def guidance_scale(self):

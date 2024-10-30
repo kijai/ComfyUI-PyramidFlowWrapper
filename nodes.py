@@ -123,7 +123,8 @@ class PyramidFlowModelLoader:
         return {
             "required": {
                 "model": (folder_paths.get_filename_list("diffusion_models"), {"tooltip": "The name of the checkpoint (model) to load.",}),
-                    "precision": (["fp8_e4m3fn","fp8_e4m3fn_fast","fp16", "fp32", "bf16"], {"default": "bf16"}),
+                "precision": (["fp8_e4m3fn","fp8_e4m3fn_fast","fp16", "fp32", "bf16"], {"default": "bf16"}),
+                "enable_sequential_cpu_offload": ("BOOLEAN", {"default": False, "tooltip": "Enable sequential cpu offload, saves VRAM but is MUCH slower, do not use unless you have to"}),
             },
             "optional": {
                 "compile_args": ("MOCHICOMPILEARGS", {"tooltip": "Optional torch.compile arguments",}),
@@ -135,7 +136,7 @@ class PyramidFlowModelLoader:
     FUNCTION = "loadmodel"
     CATEGORY = "PyramidFlowWrapper"
 
-    def loadmodel(self, model, precision, compile_args=None):
+    def loadmodel(self, model, precision,enable_sequential_cpu_offload, compile_args=None):
 
         device = mm.get_torch_device()
         offload_device = mm.unet_offload_device()
@@ -216,7 +217,10 @@ class PyramidFlowModelLoader:
                     transformer.proj_out = torch.compile(transformer.proj_out, fullgraph=compile_args["fullgraph"], dynamic=dynamic, backend=compile_args["backend"])
  
 
-        pyramid_model = PyramidDiTForVideoGeneration(transformer, dtype, model_name)
+        pyramid_model = PyramidDiTForVideoGeneration(transformer, dtype, model_name, device)
+
+        if enable_sequential_cpu_offload:
+            pyramid_model.enable_sequential_cpu_offload()
 
         return (pyramid_model,)
 
@@ -301,7 +305,7 @@ class PyramidFlowSampler:
                     output_type="latent",
                 )
 
-        if not keep_model_loaded:
+        if not keep_model_loaded and not pyramid_model.sequential_offload_enabled:
             pyramid_model.dit.to(offload_device)      
 
         return ({"samples": latents},)
