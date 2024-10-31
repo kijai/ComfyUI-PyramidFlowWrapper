@@ -421,7 +421,7 @@ class PyramidFlowSampler:
         decoded = decoder.sample(vae, {"samples":samples}, 256, 2, True)[0]
 
         if skip > 0 and not is_last:
-            decoded = decoded[-skip:, :, :]
+            decoded = decoded[:-skip:, :, :]
         encoder = PyramidFlowVAEEncode()
         encoded_last = encoder.sample(vae, decoded[-1].unsqueeze(0), enable_tiling=True)[0]
         return encoded_last, decoded
