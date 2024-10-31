@@ -1,3 +1,5 @@
+import copy
+import math
 import os
 import torch
 import folder_paths
@@ -224,6 +226,34 @@ class PyramidFlowModelLoader:
 
         return (pyramid_model,)
 
+class PyramidFlowSlidingContextOptions:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "max_temp_per_batch": ("INT", {"default": 16, "min": 1, "max": 31, "step": 1, "tooltip": "Maximum temp (number of frames) per batch"}),
+                "use_same_seed": ("BOOLEAN", {"default": False, "tooltip": "Use the same seed for each batch"}),
+                "seed": ("INT", {"default": 0, "min": 0, "max": 0xffffffffffffffff, "tooltip": "Seed for random number generator"}),
+                "skip_last_x_intermediate": ("INT", {"default": 0, "min": 0, "max": 31, "step": 1, "tooltip": "Number of last latents to skip in each batch except the last"}),
+            },
+        }
+
+    RETURN_TYPES = ("SLIDINGCONTEXTOPTIONS",)
+    RETURN_NAMES = ("sliding_context_options",)
+    FUNCTION = "get_options"
+    CATEGORY = "PyramidFlowWrapper"
+    DESCRIPTION = "Provides options for sliding context batching in the PyramidFlowSampler node."
+
+    def get_options(self, max_temp_per_batch, use_same_seed, seed, skip_last_x_intermediate):
+        options = {
+            "max_temp_per_batch": max_temp_per_batch,
+            "use_same_seed": use_same_seed,
+            "seed": seed,
+            "skip_last_x_intermediate": skip_last_x_intermediate,
+        }
+        return (options,)
+
+
 class PyramidFlowSampler:
     @classmethod
     def INPUT_TYPES(s):
@@ -235,25 +265,27 @@ class PyramidFlowSampler:
                 "height": ("INT", {"default": 384, "min": 128, "max": 2048, "step": 8}),
                 "first_frame_steps": ("STRING", {"default": "10, 10, 10", "tooltip": "Number of steps for each of the 3 stages, for the first frame, no effect when using input_latent"}),
                 "video_steps": ("STRING", {"default": "10, 10, 10", "tooltip": "Number of steps for each of the 3 stages, for the video latents"}),
-                "temp": ("INT", {"default": 8, "min": 1, "tooltip": "temp=16: 5s, temp=31: 10s"}),
+                "temp": ("INT", {"default": 16, "min": 1, "tooltip": "Total number of frames (temp) to generate. temp=16: 5s, temp=31: 10s"}),
                 "guidance_scale": ("FLOAT", {"default": 9.0, "min": 0.0, "max": 30.0, "step": 0.01, "tooltip": "The guidance for the first frame"}),
                 "video_guidance_scale": ("FLOAT", {"default": 5.0, "min": 0.0, "max": 30.0, "step": 0.01, "tooltip": "The guidance for the video latents"}),
                 "seed": ("INT", {"default": 0, "min": 0, "max": 0xffffffffffffffff}),
                 "keep_model_loaded": ("BOOLEAN", {"default": False}),
-               
             },
             "optional": {
                 "input_latent": ("LATENT", ),
+                "sliding_context_options": ("SLIDINGCONTEXTOPTIONS",),
+                "vae": ("PYRAMIDFLOWVAE", ),  # Optional VAE input
             }
         }
 
-    RETURN_TYPES = ("LATENT", )
+    RETURN_TYPES = ("LATENT", "IMAGE")
     RETURN_NAMES = ("samples", )
     FUNCTION = "sample"
     CATEGORY = "PyramidFlowWrapper"
 
-    def sample(self, model, first_frame_steps, prompt_embeds, seed, height, width, video_steps, temp, guidance_scale, video_guidance_scale, 
-               keep_model_loaded, input_latent=None):
+    def sample(self, model, first_frame_steps, prompt_embeds, seed, height, width, video_steps, temp, guidance_scale, video_guidance_scale,
+               keep_model_loaded, input_latent=None, sliding_context_options=None, vae=None):
+        images = None
         mm.soft_empty_cache()
 
         device = mm.get_torch_device()
@@ -261,14 +293,10 @@ class PyramidFlowSampler:
 
         if isinstance(model, dict):
             pyramid_model = model["model"]
-            #dtype = model["dtype"]
         else:
             pyramid_model = model
 
         dtype = pyramid_model.dit.dtype
-
-        torch.manual_seed(seed)
-        torch.cuda.manual_seed(seed)
 
         first_frame_steps = [int(num) for num in first_frame_steps.replace(" ", "").split(",")]
         video_steps = [int(num) for num in video_steps.replace(" ", "").split(",")]
@@ -277,38 +305,126 @@ class PyramidFlowSampler:
         autocastcondition = not dtype == torch.float32
         autocast_context = torch.autocast(mm.get_autocast_device(device), dtype=autocast_dtype) if autocastcondition else nullcontext()
 
-        if input_latent is None:
-            with autocast_context:
-                latents = pyramid_model.generate(
-                    prompt_embeds_dict = prompt_embeds,
-                    device=device,
-                    num_inference_steps=first_frame_steps,
-                    video_num_inference_steps=video_steps,
-                    height=height,
-                    width=width,
-                    temp=temp,
-                    guidance_scale=guidance_scale,         # The guidance for the first frame
-                    video_guidance_scale=video_guidance_scale,   # The guidance for the other video latent
-                    output_type="latent",
-                )
+        if sliding_context_options is not None:
+            # Sliding context batching enabled
+            max_temp_per_batch = sliding_context_options.get("max_temp_per_batch", temp)
+            use_same_seed = sliding_context_options.get("use_same_seed", False)
+            batch_seed = sliding_context_options.get("seed", seed)
+            skip_last_x_intermediate = sliding_context_options.get("skip_last_x_intermediate", 0)
+            temp_per_batch = max_temp_per_batch
+            num_batches = math.ceil(temp / temp_per_batch)
+
+            total_latents = []
+            images = []
+            current_input_latent = input_latent
+
+            for batch_idx in range(num_batches):
+                current_temp = min(temp_per_batch, temp - batch_idx * temp_per_batch)
+                if use_same_seed:
+                    torch.manual_seed(batch_seed)
+                    torch.cuda.manual_seed(batch_seed)
+                else:
+                    # Increment seed for each batch to ensure different randomness
+                    batch_seed = seed + batch_idx
+                    torch.manual_seed(batch_seed)
+                    torch.cuda.manual_seed(batch_seed)
+
+                if batch_idx == 0 and current_input_latent is None:
+                    # First batch without input latent
+                    with autocast_context:
+                        batch_latents = pyramid_model.generate(
+                            prompt_embeds_dict=copy.deepcopy(prompt_embeds),
+                            device=device,
+                            num_inference_steps=first_frame_steps,
+                            video_num_inference_steps=video_steps,
+                            height=height,
+                            width=width,
+                            temp=current_temp,
+                            guidance_scale=guidance_scale,
+                            video_guidance_scale=video_guidance_scale,
+                            output_type="latent",
+                        )
+                else:
+                    # Subsequent batches or first batch with input latent
+                    with autocast_context:
+                        batch_latents = pyramid_model.generate_i2v(
+                            prompt_embeds_dict=copy.deepcopy(prompt_embeds),
+                            input_image_latent=current_input_latent,
+                            device=device,
+                            num_inference_steps=video_steps,
+                            height=height,
+                            width=width,
+                            temp=current_temp,
+                            video_guidance_scale=video_guidance_scale,
+                            output_type="latent",
+                        )
+
+                # Determine whether to skip last X frames
+                is_last_batch = (batch_idx == num_batches - 1)
+                skip_frames = skip_last_x_intermediate if not is_last_batch else 0
+
+                # Decode, optionally skip, and re-encode if skip_frames > 0 and vae is provided
+                if skip_frames > 0 and not is_last_batch:
+                    current_input_latent, decoded = self.dec_enc(vae, batch_latents, skip=skip_frames, is_last=is_last_batch)
+                else:
+                    current_input_latent, decoded = self.dec_enc(vae, batch_latents, skip=0, is_last=is_last_batch)
+                #     # Use the last latent frame as the next input
+                total_latents.append(batch_latents.detach())
+                images.append(decoded)
+
+            latents = torch.cat(total_latents, dim=2)
+            images = torch.cat(images, dim=0)
+
         else:
-            with autocast_context:
-                latents = pyramid_model.generate_i2v(
-                    prompt_embeds_dict = prompt_embeds,
-                    input_image_latent=input_latent,
-                    device=device,
-                    num_inference_steps=video_steps,
-                    height=height,
-                    width=width,
-                    temp=temp,
-                    video_guidance_scale=video_guidance_scale,   # The guidance for the other video latent
-                    output_type="latent",
-                )
+            # No sliding context batching
+            torch.manual_seed(seed)
+            torch.cuda.manual_seed(seed)
+
+            if input_latent is None:
+                with autocast_context:
+                    latents = pyramid_model.generate(
+                        prompt_embeds_dict=prompt_embeds,
+                        device=device,
+                        num_inference_steps=first_frame_steps,
+                        video_num_inference_steps=video_steps,
+                        height=height,
+                        width=width,
+                        temp=temp,
+                        guidance_scale=guidance_scale,
+                        video_guidance_scale=video_guidance_scale,
+                        output_type="latent",
+                    )
+            else:
+                with autocast_context:
+                    latents = pyramid_model.generate_i2v(
+                        prompt_embeds_dict=prompt_embeds,
+                        input_image_latent=input_latent,
+                        device=device,
+                        num_inference_steps=video_steps,
+                        height=height,
+                        width=width,
+                        temp=temp,
+                        video_guidance_scale=video_guidance_scale,
+                        output_type="latent",
+                    )
+
 
         if not keep_model_loaded and not pyramid_model.sequential_offload_enabled:
-            pyramid_model.dit.to(offload_device)      
+            pyramid_model.dit.to(offload_device)
 
-        return ({"samples": latents},)
+        return ({"samples": latents}, images,)
+
+
+    def dec_enc(self, vae, samples, skip=0, is_last=False):
+
+        decoder = PyramidFlowVAEDecode()
+        decoded = decoder.sample(vae, {"samples":samples}, 256, 2, True)[0]
+
+        if skip > 0 and not is_last:
+            decoded = decoded[-skip:, :, :]
+        encoder = PyramidFlowVAEEncode()
+        encoded_last = encoder.sample(vae, decoded[-1].unsqueeze(0), enable_tiling=True)[0]
+        return encoded_last, decoded
 
 #todo: sd3 version
 class PyramidFlowTextEncode:
@@ -476,16 +592,17 @@ NODE_CLASS_MAPPINGS = {
     "PyramidFlowVAEEncode": PyramidFlowVAEEncode,
     "PyramidFlowTorchCompileSettings": PyramidFlowTorchCompileSettings,
     "PyramidFlowTransformerLoader": PyramidFlowModelLoader,
-    "PyramidFlowVAELoader": PyramidFlowVAELoader
-   
+    "PyramidFlowVAELoader": PyramidFlowVAELoader,
+    "PyramidFlowSlidingContextOptions": PyramidFlowSlidingContextOptions,  # Added new node
 }
+
 NODE_DISPLAY_NAME_MAPPINGS = {
-    "DownloadAndLoadPyramidFlowModel": "(Down)load PyramidFlow Model",
     "PyramidFlowSampler": "PyramidFlow Sampler",
-    "PyramidFlowVAEDecode" : "PyramidFlow VAE Decode",
+    "PyramidFlowVAEDecode": "PyramidFlow VAE Decode",
     "PyramidFlowTextEncode": "PyramidFlow Text Encode",
     "PyramidFlowVAEEncode": "PyramidFlow VAE Encode",
     "PyramidFlowTorchCompileSettings": "PyramidFlow Torch Compile Settings",
     "PyramidFlowTransformerLoader": "PyramidFlow Model Loader",
-    "PyramidFlowVAELoader": "PyramidFlow VAE Loader"
-    }
+    "PyramidFlowVAELoader": "PyramidFlow VAE Loader",
+    "PyramidFlowSlidingContextOptions": "PyramidFlow Sliding Context Options",  # Added new node
+}
