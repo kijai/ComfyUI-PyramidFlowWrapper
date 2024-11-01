@@ -261,11 +261,13 @@ class PyramidFlowSampler:
 
         if isinstance(model, dict):
             pyramid_model = model["model"]
-            #dtype = model["dtype"]
         else:
             pyramid_model = model
 
         dtype = pyramid_model.dit.dtype
+
+        from .latent_preview import prepare_callback
+        callback = prepare_callback(model, temp)
 
         torch.manual_seed(seed)
         torch.cuda.manual_seed(seed)
@@ -289,20 +291,20 @@ class PyramidFlowSampler:
                     temp=temp,
                     guidance_scale=guidance_scale,         # The guidance for the first frame
                     video_guidance_scale=video_guidance_scale,   # The guidance for the other video latent
-                    output_type="latent",
+                    callback=callback,
                 )
         else:
             with autocast_context:
                 latents = pyramid_model.generate_i2v(
                     prompt_embeds_dict = prompt_embeds,
-                    input_image_latent=input_latent,
+                    input_image_latent=input_latent["samples"],
                     device=device,
                     num_inference_steps=video_steps,
                     height=height,
                     width=width,
                     temp=temp,
                     video_guidance_scale=video_guidance_scale,   # The guidance for the other video latent
-                    output_type="latent",
+                    callback=callback,
                 )
 
         if not keep_model_loaded and not pyramid_model.sequential_offload_enabled:
@@ -384,6 +386,7 @@ class PyramidFlowVAEEncode:
     CATEGORY = "PyramidFlowWrapper"
 
     def sample(self, vae, image, enable_tiling):
+        B, H, W, C = image.shape
         mm.soft_empty_cache()
 
         dtype = vae.dtype
@@ -400,15 +403,16 @@ class PyramidFlowVAEEncode:
 
         normalize = transforms.Normalize(mean=(0.5, 0.5, 0.5), std=(0.5, 0.5, 0.5))
         input_image_tensor = rearrange(image, 'b h w c -> b c h w')
-        input_image_tensor = normalize(input_image_tensor)
-        input_image_tensor = input_image_tensor.unsqueeze(2)  # Add temporal dimension t=1
+        input_image_tensor = normalize(input_image_tensor).unsqueeze(0)
+        input_image_tensor = rearrange(input_image_tensor, 'b t c h w -> b c t h w', t=B)
+        #input_image_tensor = input_image_tensor.unsqueeze(2)  # Add temporal dimension t=1
         input_image_tensor = input_image_tensor.to(dtype=dtype, device=device)
 
         vae.to(device)
         input_image_latent = (vae.encode(input_image_tensor).latent_dist.sample() - vae_shift_factor) * vae_scale_factor  # [b c 1 h w]
         vae.to(offload_device)
 
-        return (input_image_latent,)
+        return ({"samples": input_image_latent},)
     
 class PyramidFlowVAEDecode:
     @classmethod
@@ -467,7 +471,79 @@ class PyramidFlowVAEDecode:
 
         
         return (image,)
-    
+
+class PyramidFlowLatentPreview:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "samples": ("LATENT",),
+                # "seed": ("INT", {"default": 0, "min": 0, "max": 0xffffffffffffffff}),
+                # "min_val": ("FLOAT", {"default": -0.15, "min": -1.0, "max": 0.0, "step": 0.001}),
+                # "max_val": ("FLOAT", {"default": 0.15, "min": 0.0, "max": 1.0, "step": 0.001}),
+            },
+        }
+
+    RETURN_TYPES = ("IMAGE", "STRING", )
+    RETURN_NAMES = ("images", "latent_rgb_factors", )
+    FUNCTION = "sample"
+    CATEGORY = "PyramidFlowWrapper"
+
+    def sample(self, samples):#, seed, min_val, max_val):
+        mm.soft_empty_cache()
+
+        latents = samples["samples"].clone()
+
+        device = mm.get_torch_device()
+        offload_device = mm.unet_offload_device()
+      
+        # For the image latent
+        vae_shift_factor = 0.1490
+        vae_scale_factor = 1 / 1.8415
+
+        # For the video latent
+        vae_video_shift_factor = -0.2343
+        vae_video_scale_factor = 1 / 3.0986
+
+        if latents.shape[2] == 1:
+            latents = (latents / vae_scale_factor) + vae_shift_factor
+        else:
+            latents[:, :, :1] = (latents[:, :, :1] / vae_scale_factor) + vae_shift_factor
+            latents[:, :, 1:] = (latents[:, :, 1:] / vae_video_scale_factor) + vae_video_shift_factor
+
+        latent_rgb_factors =  [[0.05389399697934166, 0.025018778505575393, -0.009193515248318657], [0.02318250640590553, -0.026987363837713156, 0.040172639061236956], [0.046035451343323666, -0.02039565868920197, 0.01275569344290342], [-0.015559161155025095, 0.051403973219861246, 0.03179031307996347], [-0.02766167769640129, 0.03749545161530447, 0.003335141009473408], [0.05824598730479011, 0.021744367381243884, -0.01578925627951616], [0.05260929401500947, 0.0560165014956886, -0.027477296572565126], [0.018513891242931686, 0.041961785217662514, 0.004490763489747966], [0.024063060899760215, 0.065082853069653, 0.044343437673514896], [0.05250992323006226, 0.04361117432588933, 0.01030076055524387], [0.0038921710021782366, -0.025299228133723792, 0.019370764014574535], [-0.00011950534333568519, 0.06549370069727675, -0.03436712163379723], [-0.026020578032683626, -0.013341758571090847, -0.009119046570271953], [0.024412451175602937, 0.030135064560817174, -0.008355486384198006], [0.04002209845752687, -0.017341304390739463, 0.02818338690302971], [-0.032575108695213684, -0.009588338926775117, -0.03077312160940468]]
+ 
+        #import random
+        #random.seed(seed)
+        #latent_rgb_factors = [[random.uniform(min_val, max_val) for _ in range(3)] for _ in range(16)]
+        out_factors = latent_rgb_factors
+        print(latent_rgb_factors)
+       
+        
+        latent_rgb_factors_bias = [0,0,0]
+        
+        latent_rgb_factors = torch.tensor(latent_rgb_factors, device=latents.device, dtype=latents.dtype).transpose(0, 1)
+        latent_rgb_factors_bias = torch.tensor(latent_rgb_factors_bias, device=latents.device, dtype=latents.dtype)
+
+        print("latent_rgb_factors", latent_rgb_factors.shape)
+
+        latent_images = []
+        for t in range(latents.shape[2]):
+            latent = latents[:, :, t, :, :]
+            latent = latent[0].permute(1, 2, 0)
+            latent_image = torch.nn.functional.linear(
+                latent,
+                latent_rgb_factors,
+                bias=latent_rgb_factors_bias
+            )
+            latent_images.append(latent_image)
+        latent_images = torch.stack(latent_images, dim=0)
+        print("latent_images", latent_images.shape)
+        latent_images_min = latent_images.min()
+        latent_images_max = latent_images.max()
+        latent_images = (latent_images - latent_images_min) / (latent_images_max - latent_images_min)
+        
+        return (latent_images.float().cpu(), out_factors)    
 
 NODE_CLASS_MAPPINGS = {
     "PyramidFlowSampler": PyramidFlowSampler,
@@ -476,7 +552,8 @@ NODE_CLASS_MAPPINGS = {
     "PyramidFlowVAEEncode": PyramidFlowVAEEncode,
     "PyramidFlowTorchCompileSettings": PyramidFlowTorchCompileSettings,
     "PyramidFlowTransformerLoader": PyramidFlowModelLoader,
-    "PyramidFlowVAELoader": PyramidFlowVAELoader
+    "PyramidFlowVAELoader": PyramidFlowVAELoader,
+    "PyramidFlowLatentPreview": PyramidFlowLatentPreview
    
 }
 NODE_DISPLAY_NAME_MAPPINGS = {
@@ -487,5 +564,6 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "PyramidFlowVAEEncode": "PyramidFlow VAE Encode",
     "PyramidFlowTorchCompileSettings": "PyramidFlow Torch Compile Settings",
     "PyramidFlowTransformerLoader": "PyramidFlow Model Loader",
-    "PyramidFlowVAELoader": "PyramidFlow VAE Loader"
+    "PyramidFlowVAELoader": "PyramidFlow VAE Loader",
+    "PyramidFlowLatentPreview": "PyramidFlow Latent Preview"
     }

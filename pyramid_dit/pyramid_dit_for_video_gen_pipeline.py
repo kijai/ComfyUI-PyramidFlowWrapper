@@ -1,3 +1,5 @@
+from types import SimpleNamespace
+
 import torch
 import torch.nn.functional as F
 
@@ -7,7 +9,7 @@ from diffusers.utils.torch_utils import randn_tensor
 import math
 from tqdm import tqdm
 
-from typing import List, Optional, Union
+from typing import List, Optional, Union, Callable
 from ..diffusion_schedulers import PyramidFlowMatchEulerDiscreteScheduler
 from accelerate import cpu_offload
 from comfy.utils import ProgressBar
@@ -56,6 +58,10 @@ class PyramidDiTForVideoGeneration:
         self.device = main_device
         self.sequential_offload_enabled = False
 
+        from comfy import latent_formats
+        self.model = SimpleNamespace(latent_format=latent_formats.Flux())
+        self.load_device = main_device
+
         if model_dtype in [torch.float8_e4m3fn, torch.float8_e5m2]:
             self.dtype = torch.bfloat16
         else:
@@ -89,6 +95,7 @@ class PyramidDiTForVideoGeneration:
         )
         #round the gamma as 1/3 seems to have issues on some systems
         self.gamma = round(self.scheduler.config.gamma, 5)
+        self.dist = torch.distributions.MultivariateNormal(torch.zeros(4), torch.eye(4) * (1 + self.gamma) - torch.ones(4, 4) * self.gamma)        
         
         print(f"The start sigmas and end sigmas of each stage is Start: {self.scheduler.start_sigmas}, End: {self.scheduler.end_sigmas}, Ori_start: {self.scheduler.ori_start_sigmas}")
         
@@ -142,13 +149,15 @@ class PyramidDiTForVideoGeneration:
         )
         latents = randn_tensor(shape, generator=generator, device=device, dtype=dtype)
         return latents
-
+    
+    
     def sample_block_noise(self, bs, ch, temp, height, width):
-        dist = torch.distributions.multivariate_normal.MultivariateNormal(torch.zeros(4), torch.eye(4) * (1 + self.gamma) - torch.ones(4, 4) * self.gamma)
         block_number = bs * ch * temp * (height // 2) * (width // 2)
-        noise = torch.stack([dist.sample() for _ in range(block_number)]) # [block number, 4]
+        noise = torch.stack([self.dist.sample() for _ in range(block_number)]) # [block number, 4]
         noise = rearrange(noise, '(b c t h w) (p q) -> b c t (h p) (w q)',b=bs,c=ch,t=temp,h=height//2,w=width//2,p=2,q=2)
         return noise
+
+
 
     @torch.no_grad()
     def generate_one_unit(
@@ -166,6 +175,7 @@ class PyramidDiTForVideoGeneration:
         dtype,
         generator: Optional[Union[torch.Generator, List[torch.Generator]]] = None,
         is_first_frame: bool = False,
+        callback = None,
     ):
         stages = self.stages
         intermed_latents = []
@@ -198,7 +208,6 @@ class PyramidDiTForVideoGeneration:
                 timestep = t.expand(latent_model_input.shape[0]).to(latent_model_input.dtype)
                 
                 latent_model_input = past_conditions[i_s] + [latent_model_input]
-
                 noise_pred = self.dit(
                     sample=[latent_model_input],
                     timestep_ratio=timestep,
@@ -208,10 +217,6 @@ class PyramidDiTForVideoGeneration:
                 )
 
                 noise_pred = noise_pred[0]
-
-                # nan_mask = torch.isnan(noise_pred)
-                # if torch.any(nan_mask):
-                #     raise ValueError("nan in hidden_states")
                 
                 # perform guidance
                 if self.do_classifier_free_guidance:
@@ -228,11 +233,9 @@ class PyramidDiTForVideoGeneration:
                     sample=latents,
                     generator=generator,
                 ).prev_sample
-            #nan_mask = torch.isnan(latents)
-            #if torch.any(nan_mask):
-            #    raise ValueError("nan in latents")
 
             intermed_latents.append(latents)
+           
 
         return intermed_latents
 
@@ -253,32 +256,18 @@ class PyramidDiTForVideoGeneration:
         alpha: float = 0.5,
         num_images_per_prompt: Optional[int] = 1,
         generator: Optional[Union[torch.Generator, List[torch.Generator]]] = None,
-        output_type: Optional[str] = "pil",
+        callback: Optional[Callable] = None,
     ):
-        #device = self.device
         dtype = self.dtype
 
         assert temp % self.frame_per_unit == 0, "The frames should be divided by frame_per unit"
         batch_size = prompt_embeds_dict['prompt_embeds'].shape[0]
-        # if isinstance(prompt, str):
-        #     batch_size = 1
-        #     prompt = prompt + ", hyper quality, Ultra HD, 8K"   # adding this prompt to improve aesthetics
-        # else:
-        #     assert isinstance(prompt, list)
-        #     batch_size = len(prompt)
-        #     prompt = [_ + ", hyper quality, Ultra HD, 8K" for _ in prompt]
 
         if isinstance(num_inference_steps, int):
             num_inference_steps = [num_inference_steps] * len(self.stages)
         elif isinstance(num_inference_steps, list) and len(num_inference_steps) < len(self.stages):
             num_inference_steps = (num_inference_steps * len(self.stages))[:len(self.stages)]
         
-        # negative_prompt = negative_prompt or ""
-
-        # # Get the text embeddings
-        # prompt_embeds, prompt_attention_mask, pooled_prompt_embeds = self.text_encoder(prompt, device)
-        # negative_prompt_embeds, negative_prompt_attention_mask, negative_pooled_prompt_embeds = self.text_encoder(negative_prompt, device)
-
         if use_linear_guidance:
             max_guidance_scale = guidance_scale
             guidance_scale_list = [max(max_guidance_scale - alpha * t_, min_guidance_scale) for t_ in range(temp+1)]
@@ -299,11 +288,6 @@ class PyramidDiTForVideoGeneration:
             prompt_embeds = torch.cat([negative_prompt_embeds, positive_prompt_embeds], dim=0)
             pooled_prompt_embeds = torch.cat([negative_pooled_prompt_embeds, positive_pooled_prompt_embeds], dim=0)
             prompt_attention_mask = torch.cat([negative_prompt_attention_mask, positive_prompt_attention_mask], dim=0)
-
-        # prompt_embeds = prompt_embeds.to(dtype)
-        # pooled_prompt_embeds = pooled_prompt_embeds.to(dtype)
-        # prompt_attention_mask = prompt_attention_mask.to(dtype)
-
 
         # Create the initial random noise
         num_channels_latents = (self.dit.config.in_channels // 4) if self.model_name == "pyramid_flux" else  self.dit.config.in_channels
@@ -330,17 +314,9 @@ class PyramidDiTForVideoGeneration:
 
         num_units = temp // self.frame_per_unit
         stages = self.stages
-
-        # # encode the image latents
-        # image_transform = transforms.Compose([
-        #     transforms.ToTensor(),
-        #     transforms.Normalize(mean=(0.5, 0.5, 0.5), std=(0.5, 0.5, 0.5)),
-        # ])
-        #input_image_tensor = image_transform(input_image).unsqueeze(0).unsqueeze(2)   # [b c 1 h w]
         
         input_image_latent = input_image_latent.to(dtype).to(device)
         generated_latents_list = [input_image_latent]    # The generated results
-        #last_generated_latents = input_image_latent
 
         if not self.sequential_offload_enabled:
             self.dit.to(device)
@@ -394,20 +370,19 @@ class PyramidDiTForVideoGeneration:
                 dtype,
                 generator,
                 is_first_frame=False,
+                callback=callback
             )
             
-            comfy_pbar.update(1)
+            
+            if callback is not None:
+                callback(unit_index, intermed_latents[-1].detach()[0].permute(1,0,2,3), None, temp)
+            else:
+                comfy_pbar.update(1)
             generated_latents_list.append(intermed_latents[-1])
-            #last_generated_latents = intermed_latents
 
         generated_latents = torch.cat(generated_latents_list, dim=2)
 
-        if output_type == "latent":
-            image = generated_latents
-        else:
-            image = self.decode_latent(generated_latents)
-
-        return image
+        return generated_latents
 
     @torch.no_grad()
     def generate(
@@ -425,18 +400,10 @@ class PyramidDiTForVideoGeneration:
         alpha: float = 0.5,
         num_images_per_prompt: Optional[int] = 1,
         generator: Optional[Union[torch.Generator, List[torch.Generator]]] = None,
-        output_type: Optional[str] = "pil",
         device: Optional[torch.device] = None,
+        callback = None
     ):
         assert (temp - 1) % self.frame_per_unit == 0, "The frames should be divided by frame_per unit"
-
-        # if isinstance(prompt, str):
-        #     batch_size = 1
-        #     prompt = prompt + ", hyper quality, Ultra HD, 8K"        # adding this prompt to improve aesthetics
-        # else:
-        #     assert isinstance(prompt, list)
-        #     batch_size = len(prompt)
-        #     prompt = [_ + ", hyper quality, Ultra HD, 8K" for _ in prompt]
 
         if isinstance(num_inference_steps, int):
             num_inference_steps = [num_inference_steps] * len(self.stages)
@@ -448,19 +415,11 @@ class PyramidDiTForVideoGeneration:
         elif isinstance(video_num_inference_steps, list) and len(video_num_inference_steps) < len(self.stages):
             video_num_inference_steps = (video_num_inference_steps * len(self.stages))[:len(self.stages)]
 
-        #negative_prompt = negative_prompt or ""
-
-        # # Get the text embeddings
-        # self.text_encoder.to(device)
-        # prompt_embeds, prompt_attention_mask, pooled_prompt_embeds = self.text_encoder(prompt, device)
-        # negative_prompt_embeds, negative_prompt_attention_mask, negative_pooled_prompt_embeds = self.text_encoder(negative_prompt, device)
-        # self.text_encoder.to('cpu')
 
         batch_size = prompt_embeds_dict['prompt_embeds'].shape[0]
 
         if use_linear_guidance:
             max_guidance_scale = guidance_scale
-            # guidance_scale_list = torch.linspace(max_guidance_scale, min_guidance_scale, temp).tolist()
             guidance_scale_list = [max(max_guidance_scale - alpha * t_, min_guidance_scale) for t_ in range(temp)]
             print(guidance_scale_list)
 
@@ -512,7 +471,7 @@ class PyramidDiTForVideoGeneration:
         stages = self.stages
 
         generated_latents_list = []    # The generated results
-        #last_generated_latents = None
+
         if not self.sequential_offload_enabled:
             self.dit.to(device)
         comfy_pbar = ProgressBar(num_units)
@@ -538,6 +497,7 @@ class PyramidDiTForVideoGeneration:
                     self.dtype,
                     generator,
                     is_first_frame=True,
+                    callback=callback
                 )
             else:
                 # prepare the condition latents
@@ -583,23 +543,19 @@ class PyramidDiTForVideoGeneration:
                     self.dtype,
                     generator,
                     is_first_frame=False,
+                    callback=callback
                 )
+
             comfy_pbar.update(1)
             generated_latents_list.append(intermed_latents[-1])
-            #last_generated_latents = intermed_latents
+            if callback is not None:
+                callback(unit_index, intermed_latents[-1].detach()[0].permute(1,0,2,3), None, temp)
+            else:
+                comfy_pbar.update(1)
 
         generated_latents = torch.cat(generated_latents_list, dim=2)
 
-        if output_type == "latent":
-            image = generated_latents
-        else:
-            image = self.decode_latent(generated_latents, device)
-
-        return image
-
-    # @property
-    # def device(self):
-    #     return next(self.dit.parameters()).device
+        return generated_latents
     
     @property
     def guidance_scale(self):

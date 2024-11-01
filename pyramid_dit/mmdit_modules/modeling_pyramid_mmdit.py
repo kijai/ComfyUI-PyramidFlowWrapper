@@ -13,16 +13,6 @@ from .modeling_embedding import PatchEmbed3D, CombinedTimestepConditionEmbedding
 from .modeling_normalization import AdaLayerNormContinuous
 from .modeling_mmdit_block import JointTransformerBlock
 
-from ...trainer_misc import (
-    is_sequence_parallel_initialized,
-    get_sequence_parallel_group,
-    get_sequence_parallel_world_size,
-    get_sequence_parallel_rank,
-    all_to_all,
-)
-
-#from IPython import embed
-
 
 def rope(pos: torch.Tensor, dim: int, theta: int) -> torch.Tensor:
     assert dim % 2 == 0, "The dimension must be even."
@@ -315,12 +305,6 @@ class PyramidDiffusionMMDiT(ModelMixin, ConfigMixin):
             for i_p, length in enumerate(hidden_length):
                 pad_attention_mask = torch.ones((pad_batch_size, length), dtype=encoder_attention_mask.dtype).to(device)
                 pad_attention_mask = torch.cat([encoder_attention_mask[i_p::num_stages], pad_attention_mask], dim=1)
-                
-                if is_sequence_parallel_initialized():
-                    sp_group = get_sequence_parallel_group()
-                    sp_group_size = get_sequence_parallel_world_size()
-                    pad_attention_mask = all_to_all(pad_attention_mask.unsqueeze(2).repeat(1, 1, sp_group_size), sp_group, sp_group_size, scatter_dim=2, gather_dim=0)
-                    pad_attention_mask = pad_attention_mask.squeeze(2)
 
                 seqlens_in_batch = pad_attention_mask.sum(dim=-1, dtype=torch.int32)
                 indices = torch.nonzero(pad_attention_mask.flatten(), as_tuple=False).flatten()
@@ -347,12 +331,6 @@ class PyramidDiffusionMMDiT(ModelMixin, ConfigMixin):
             for i_p, length in enumerate(hidden_length):
                 image_ids_list.append(image_ids[i_p::num_stages][:, :length])
 
-            if is_sequence_parallel_initialized():
-                sp_group = get_sequence_parallel_group()
-                sp_group_size = get_sequence_parallel_world_size()
-                text_ids = all_to_all(text_ids.unsqueeze(2).repeat(1, 1, sp_group_size), sp_group, sp_group_size, scatter_dim=2, gather_dim=0).squeeze(2)
-                image_ids_list = [all_to_all(image_ids_.unsqueeze(2).repeat(1, 1, sp_group_size), sp_group, sp_group_size, scatter_dim=2, gather_dim=0).squeeze(2) for image_ids_ in image_ids_list]
-
             attention_mask = []
             for i_p in range(len(hidden_length)):
                 image_ids = image_ids_list[i_p]
@@ -372,19 +350,10 @@ class PyramidDiffusionMMDiT(ModelMixin, ConfigMixin):
         output_hidden_list = []
         batch_hidden_states = torch.split(batch_hidden_states, hidden_length, dim=1)
 
-        if is_sequence_parallel_initialized():
-            sp_group_size = get_sequence_parallel_world_size()
-            batch_size = batch_size // sp_group_size
-
         for i_p, length in enumerate(hidden_length):
             width, height, temp = widths[i_p], heights[i_p], temps[i_p]
             trainable_token_num = trainable_token_list[i_p]
             hidden_states = batch_hidden_states[i_p]
-
-            if is_sequence_parallel_initialized():
-                sp_group = get_sequence_parallel_group()
-                sp_group_size = get_sequence_parallel_world_size()
-                hidden_states = all_to_all(hidden_states, sp_group, sp_group_size, scatter_dim=0, gather_dim=1)
 
             # only the trainable token are taking part in loss computation
             hidden_states = hidden_states[:, -trainable_token_num:]
