@@ -3,33 +3,26 @@ from typing import Any, Dict, List, Optional, Union
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import inspect
 from einops import rearrange
 
 from diffusers.utils import deprecate
 from diffusers.models.activations import GEGLU, GELU, ApproximateGELU, SwiGLU
 
-from .modeling_normalization import (
-    AdaLayerNormContinuous, AdaLayerNormZero, 
-    AdaLayerNormZeroSingle, FP32LayerNorm, RMSNorm
-)
-
-from ...trainer_misc import (
-    is_sequence_parallel_initialized,
-    get_sequence_parallel_group,
-    get_sequence_parallel_world_size,
-    all_to_all,
-)
+# try:
+#     from flash_attn.ops.triton.layer_norm import RMSNorm as FlashRMSNorm #slightly faster
+#     @torch.compiler.disable() #cause NaNs when compiled for some reason
+#     class RMSNorm(FlashRMSNorm):
+#         pass
+# except:
+from .modeling_normalization import RMSNorm
+from .modeling_normalization import (AdaLayerNormZero, AdaLayerNormZeroSingle, FP32LayerNorm)
 
 try:
-    from flash_attn import flash_attn_qkvpacked_func, flash_attn_func
     from flash_attn.bert_padding import pad_input, unpad_input, index_first_axis
     from flash_attn.flash_attn_interface import flash_attn_varlen_func
 except:
-    flash_attn_func = None
-    flash_attn_qkvpacked_func = None
     flash_attn_varlen_func = None
-
+    
 
 def apply_rope(xq, xk, freqs_cis):
     xq_ = xq.float().reshape(*xq.shape[:-1], -1, 1, 2)
@@ -98,92 +91,6 @@ class FeedForward(nn.Module):
         for module in self.net:
             hidden_states = module(hidden_states)
         return hidden_states
-
-
-class SequenceParallelVarlenFlashSelfAttentionWithT5Mask:
-
-    def __init__(self):
-        pass
-
-    def __call__(
-            self, query, key, value, encoder_query, encoder_key, encoder_value, 
-            heads, scale, hidden_length=None, image_rotary_emb=None, encoder_attention_mask=None,
-        ):
-        assert encoder_attention_mask is not None, "The encoder-hidden mask needed to be set"
-
-        batch_size = query.shape[0]
-        qkv_list = []
-        num_stages = len(hidden_length)
-
-        encoder_qkv = torch.stack([encoder_query, encoder_key, encoder_value], dim=2) # [bs, sub_seq, 3, head, head_dim]
-        qkv = torch.stack([query, key, value], dim=2) # [bs, sub_seq, 3, head, head_dim]
-
-        # To sync the encoder query, key and values
-        sp_group = get_sequence_parallel_group()
-        sp_group_size = get_sequence_parallel_world_size()
-        encoder_qkv = all_to_all(encoder_qkv, sp_group, sp_group_size, scatter_dim=3, gather_dim=1) # [bs, seq, 3, sub_head, head_dim]
-
-        output_hidden = torch.zeros_like(qkv[:,:,0])
-        output_encoder_hidden = torch.zeros_like(encoder_qkv[:,:,0])
-        encoder_length = encoder_qkv.shape[1]
-        
-        i_sum = 0
-        for i_p, length in enumerate(hidden_length):
-            # get the query, key, value from padding sequence
-            encoder_qkv_tokens = encoder_qkv[i_p::num_stages]
-            qkv_tokens = qkv[:, i_sum:i_sum+length]
-            qkv_tokens = all_to_all(qkv_tokens, sp_group, sp_group_size, scatter_dim=3, gather_dim=1) # [bs, seq, 3, sub_head, head_dim]
-            concat_qkv_tokens = torch.cat([encoder_qkv_tokens, qkv_tokens], dim=1)  # [bs, pad_seq, 3, nhead, dim]
-
-            if image_rotary_emb is not None:
-                concat_qkv_tokens[:,:,0], concat_qkv_tokens[:,:,1] = apply_rope(concat_qkv_tokens[:,:,0], concat_qkv_tokens[:,:,1], image_rotary_emb[i_p])
-
-            indices = encoder_attention_mask[i_p]['indices']
-            qkv_list.append(index_first_axis(rearrange(concat_qkv_tokens, "b s ... -> (b s) ..."), indices))
-            i_sum += length
-
-        token_lengths = [x_.shape[0] for x_ in qkv_list]
-        qkv = torch.cat(qkv_list, dim=0)
-        query, key, value = qkv.unbind(1)
-
-        cu_seqlens = torch.cat([x_['seqlens_in_batch'] for x_ in encoder_attention_mask], dim=0)
-        max_seqlen_q = cu_seqlens.max().item()
-        max_seqlen_k = max_seqlen_q
-        cu_seqlens_q = F.pad(torch.cumsum(cu_seqlens, dim=0, dtype=torch.int32), (1, 0))
-        cu_seqlens_k = cu_seqlens_q.clone()
-
-        output = flash_attn_varlen_func(
-            query,
-            key,
-            value,
-            cu_seqlens_q=cu_seqlens_q,
-            cu_seqlens_k=cu_seqlens_k,
-            max_seqlen_q=max_seqlen_q,
-            max_seqlen_k=max_seqlen_k,
-            dropout_p=0.0,
-            causal=False,
-            softmax_scale=scale,
-        )
-
-        # To merge the tokens
-        i_sum = 0;token_sum = 0
-        for i_p, length in enumerate(hidden_length):
-            tot_token_num = token_lengths[i_p]
-            stage_output = output[token_sum : token_sum + tot_token_num]
-            stage_output = pad_input(stage_output, encoder_attention_mask[i_p]['indices'], batch_size, encoder_length + length * sp_group_size)
-            stage_encoder_hidden_output = stage_output[:, :encoder_length]
-            stage_hidden_output = stage_output[:, encoder_length:]
-            stage_hidden_output = all_to_all(stage_hidden_output, sp_group, sp_group_size, scatter_dim=1, gather_dim=2)
-            output_hidden[:, i_sum:i_sum+length] = stage_hidden_output
-            output_encoder_hidden[i_p::num_stages] = stage_encoder_hidden_output
-            token_sum += tot_token_num
-            i_sum += length
-
-        output_encoder_hidden = all_to_all(output_encoder_hidden, sp_group, sp_group_size, scatter_dim=1, gather_dim=2)
-        output_hidden = output_hidden.flatten(2, 3)
-        output_encoder_hidden = output_encoder_hidden.flatten(2, 3)
-
-        return output_hidden, output_encoder_hidden
 
 
 class VarlenFlashSelfAttentionWithT5Mask:
@@ -262,69 +169,6 @@ class VarlenFlashSelfAttentionWithT5Mask:
 
         return output_hidden, output_encoder_hidden
 
-
-class SequenceParallelVarlenSelfAttentionWithT5Mask:
-
-    def __init__(self):
-        pass
-
-    def __call__(
-            self, query, key, value, encoder_query, encoder_key, encoder_value, 
-            heads, scale, hidden_length=None, image_rotary_emb=None, attention_mask=None,
-        ):
-        assert attention_mask is not None, "The attention mask needed to be set"
-
-        num_stages = len(hidden_length)        
-    
-        encoder_qkv = torch.stack([encoder_query, encoder_key, encoder_value], dim=2) # [bs, sub_seq, 3, head, head_dim]
-        qkv = torch.stack([query, key, value], dim=2) # [bs, sub_seq, 3, head, head_dim]
-
-        # To sync the encoder query, key and values
-        sp_group = get_sequence_parallel_group()
-        sp_group_size = get_sequence_parallel_world_size()
-        encoder_qkv = all_to_all(encoder_qkv, sp_group, sp_group_size, scatter_dim=3, gather_dim=1) # [bs, seq, 3, sub_head, head_dim]
-        encoder_length = encoder_qkv.shape[1]
-
-        i_sum = 0
-        output_encoder_hidden_list = []
-        output_hidden_list = []
-    
-        for i_p, length in enumerate(hidden_length):
-            encoder_qkv_tokens = encoder_qkv[i_p::num_stages]
-            qkv_tokens = qkv[:, i_sum:i_sum+length]
-            qkv_tokens = all_to_all(qkv_tokens, sp_group, sp_group_size, scatter_dim=3, gather_dim=1) # [bs, seq, 3, sub_head, head_dim]
-            concat_qkv_tokens = torch.cat([encoder_qkv_tokens, qkv_tokens], dim=1)  # [bs, tot_seq, 3, nhead, dim]
-            
-            if image_rotary_emb is not None:
-                concat_qkv_tokens[:,:,0], concat_qkv_tokens[:,:,1] = apply_rope(concat_qkv_tokens[:,:,0], concat_qkv_tokens[:,:,1], image_rotary_emb[i_p])
-
-            query, key, value = concat_qkv_tokens.unbind(2)   # [bs, tot_seq, nhead, dim]
-            query = query.transpose(1, 2)
-            key = key.transpose(1, 2)
-            value = value.transpose(1, 2)
-
-            stage_hidden_states = F.scaled_dot_product_attention(
-                query, key, value, dropout_p=0.0, is_causal=False, attn_mask=attention_mask[i_p],
-            )
-            stage_hidden_states = stage_hidden_states.transpose(1, 2)   # [bs, tot_seq, nhead, dim]
-
-            output_encoder_hidden_list.append(stage_hidden_states[:, :encoder_length])
-
-            output_hidden = stage_hidden_states[:, encoder_length:]
-            output_hidden = all_to_all(output_hidden, sp_group, sp_group_size, scatter_dim=1, gather_dim=2)
-            output_hidden_list.append(output_hidden)
-
-            i_sum += length
-
-        output_encoder_hidden = torch.stack(output_encoder_hidden_list, dim=1)  # [b n s nhead d]
-        output_encoder_hidden = rearrange(output_encoder_hidden, 'b n s h d -> (b n) s h d')
-        output_encoder_hidden = all_to_all(output_encoder_hidden, sp_group, sp_group_size, scatter_dim=1, gather_dim=2)
-        output_encoder_hidden = output_encoder_hidden.flatten(2, 3)
-        output_hidden = torch.cat(output_hidden_list, dim=1).flatten(2, 3)
-
-        return output_hidden, output_encoder_hidden
-
-
 class VarlenSelfAttentionWithT5Mask:
 
     def __init__(self):
@@ -374,80 +218,6 @@ class VarlenSelfAttentionWithT5Mask:
         output_hidden = torch.cat(output_hidden_list, dim=1)
 
         return output_hidden, output_encoder_hidden
-
-
-class SequenceParallelVarlenFlashAttnSingle:
-
-    def __init__(self):
-        pass
-
-    def __call__(
-            self, query, key, value, heads, scale, 
-            hidden_length=None, image_rotary_emb=None, encoder_attention_mask=None,
-        ):
-        assert encoder_attention_mask is not None, "The encoder-hidden mask needed to be set"
-
-        batch_size = query.shape[0]
-        qkv_list = []
-        num_stages = len(hidden_length)
-
-        qkv = torch.stack([query, key, value], dim=2) # [bs, sub_seq, 3, head, head_dim]
-        output_hidden = torch.zeros_like(qkv[:,:,0])
-
-        sp_group = get_sequence_parallel_group()
-        sp_group_size = get_sequence_parallel_world_size()
-    
-        i_sum = 0
-        for i_p, length in enumerate(hidden_length):
-            # get the query, key, value from padding sequence
-            qkv_tokens = qkv[:, i_sum:i_sum+length]
-            qkv_tokens = all_to_all(qkv_tokens, sp_group, sp_group_size, scatter_dim=3, gather_dim=1) # [bs, seq, 3, sub_head, head_dim]
-
-            if image_rotary_emb is not None:
-                qkv_tokens[:,:,0], qkv_tokens[:,:,1] = apply_rope(qkv_tokens[:,:,0], qkv_tokens[:,:,1], image_rotary_emb[i_p])
-
-            indices = encoder_attention_mask[i_p]['indices']
-            qkv_list.append(index_first_axis(rearrange(qkv_tokens, "b s ... -> (b s) ..."), indices))
-            i_sum += length
-
-        token_lengths = [x_.shape[0] for x_ in qkv_list]
-        qkv = torch.cat(qkv_list, dim=0)
-        query, key, value = qkv.unbind(1)
-
-        cu_seqlens = torch.cat([x_['seqlens_in_batch'] for x_ in encoder_attention_mask], dim=0)
-        max_seqlen_q = cu_seqlens.max().item()
-        max_seqlen_k = max_seqlen_q
-        cu_seqlens_q = F.pad(torch.cumsum(cu_seqlens, dim=0, dtype=torch.int32), (1, 0))
-        cu_seqlens_k = cu_seqlens_q.clone()
-
-        output = flash_attn_varlen_func(
-            query,
-            key,
-            value,
-            cu_seqlens_q=cu_seqlens_q,
-            cu_seqlens_k=cu_seqlens_k,
-            max_seqlen_q=max_seqlen_q,
-            max_seqlen_k=max_seqlen_k,
-            dropout_p=0.0,
-            causal=False,
-            softmax_scale=scale,
-        )
-
-        # To merge the tokens
-        i_sum = 0;token_sum = 0
-        for i_p, length in enumerate(hidden_length):
-            tot_token_num = token_lengths[i_p]
-            stage_output = output[token_sum : token_sum + tot_token_num]
-            stage_output = pad_input(stage_output, encoder_attention_mask[i_p]['indices'], batch_size, length * sp_group_size)
-            stage_hidden_output = all_to_all(stage_output, sp_group, sp_group_size, scatter_dim=1, gather_dim=2)
-            output_hidden[:, i_sum:i_sum+length] = stage_hidden_output
-            token_sum += tot_token_num
-            i_sum += length
-
-        output_hidden = output_hidden.flatten(2, 3)
-
-        return output_hidden
-
 
 class VarlenFlashSelfAttnSingle:
 
@@ -515,56 +285,6 @@ class VarlenFlashSelfAttnSingle:
 
         return output_hidden
 
-
-class SequenceParallelVarlenAttnSingle:
-
-    def __init__(self):
-        pass
-
-    def __call__(
-            self, query, key, value, heads, scale, 
-            hidden_length=None, image_rotary_emb=None, attention_mask=None,
-        ):
-        assert attention_mask is not None, "The attention mask needed to be set"
-
-        num_stages = len(hidden_length)        
-        qkv = torch.stack([query, key, value], dim=2) # [bs, sub_seq, 3, head, head_dim]
-
-        # To sync the encoder query, key and values
-        sp_group = get_sequence_parallel_group()
-        sp_group_size = get_sequence_parallel_world_size()
-
-        i_sum = 0
-        output_hidden_list = []
-    
-        for i_p, length in enumerate(hidden_length):
-            qkv_tokens = qkv[:, i_sum:i_sum+length]
-            qkv_tokens = all_to_all(qkv_tokens, sp_group, sp_group_size, scatter_dim=3, gather_dim=1) # [bs, seq, 3, sub_head, head_dim]
-            
-            if image_rotary_emb is not None:
-                qkv_tokens[:,:,0], qkv_tokens[:,:,1] = apply_rope(qkv_tokens[:,:,0], qkv_tokens[:,:,1], image_rotary_emb[i_p])
-
-            query, key, value = qkv_tokens.unbind(2)   # [bs, tot_seq, nhead, dim]
-            query = query.transpose(1, 2).contiguous()
-            key = key.transpose(1, 2).contiguous()
-            value = value.transpose(1, 2).contiguous()
-
-            stage_hidden_states = F.scaled_dot_product_attention(
-                query, key, value, dropout_p=0.0, is_causal=False, attn_mask=attention_mask[i_p],
-            )
-            stage_hidden_states = stage_hidden_states.transpose(1, 2)   # [bs, tot_seq, nhead, dim]
-
-            output_hidden = stage_hidden_states
-            output_hidden = all_to_all(output_hidden, sp_group, sp_group_size, scatter_dim=1, gather_dim=2)
-            output_hidden_list.append(output_hidden)
-
-            i_sum += length
-
-        output_hidden = torch.cat(output_hidden_list, dim=1).flatten(2, 3)
-
-        return output_hidden
-
-
 class VarlenSelfAttnSingle:
 
     def __init__(self):
@@ -575,8 +295,7 @@ class VarlenSelfAttnSingle:
             hidden_length=None, image_rotary_emb=None, attention_mask=None,
         ):
         assert attention_mask is not None, "The attention mask needed to be set"
-
-        num_stages = len(hidden_length)        
+       
         qkv = torch.stack([query, key, value], dim=2) # [bs, sub_seq, 3, head, head_dim]
 
         i_sum = 0
@@ -732,15 +451,9 @@ class FluxSingleAttnProcessor2_0:
         self.use_flash_attn = use_flash_attn
 
         if self.use_flash_attn:
-            if is_sequence_parallel_initialized():
-                self.varlen_flash_attn = SequenceParallelVarlenFlashAttnSingle()
-            else:
-                self.varlen_flash_attn = VarlenFlashSelfAttnSingle()
+            self.varlen_flash_attn = VarlenFlashSelfAttnSingle()
         else:
-            if is_sequence_parallel_initialized():
-                self.varlen_attn = SequenceParallelVarlenAttnSingle()
-            else:
-                self.varlen_attn = VarlenSelfAttnSingle()
+            self.varlen_attn = VarlenSelfAttnSingle()
 
     def __call__(
         self,
@@ -792,15 +505,9 @@ class FluxAttnProcessor2_0:
         self.use_flash_attn = use_flash_attn
 
         if self.use_flash_attn:
-            if is_sequence_parallel_initialized():
-                self.varlen_flash_attn = SequenceParallelVarlenFlashSelfAttentionWithT5Mask()
-            else:
-                self.varlen_flash_attn = VarlenFlashSelfAttentionWithT5Mask()
+            self.varlen_flash_attn = VarlenFlashSelfAttentionWithT5Mask()
         else:
-            if is_sequence_parallel_initialized():
-                self.varlen_attn = SequenceParallelVarlenSelfAttentionWithT5Mask()
-            else:
-                self.varlen_attn = VarlenSelfAttentionWithT5Mask()
+            self.varlen_attn = VarlenSelfAttentionWithT5Mask()
 
     def __call__(
         self,
@@ -813,6 +520,7 @@ class FluxAttnProcessor2_0:
         image_rotary_emb: Optional[torch.Tensor] = None,
     ) -> torch.FloatTensor:
         # `sample` projections.
+        
         query = attn.to_q(hidden_states)
         key = attn.to_k(hidden_states)
         value = attn.to_v(hidden_states)
