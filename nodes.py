@@ -224,6 +224,7 @@ class PyramidFlowModelLoader:
 
         return (pyramid_model,)
 
+#region Sampler
 class PyramidFlowSampler:
     @classmethod
     def INPUT_TYPES(s):
@@ -358,7 +359,7 @@ class PyramidFlowTextEncode:
 
         if force_offload:
             clip.cond_stage_model.to(offload_device)
-        
+        clip.cond_stage_model.reset_clip_options()
         embeds = {
             "prompt_embeds": prompt_embeds.to(device),
             "attention_mask": prompt_attention_mask["attention_mask"].to(device),
@@ -369,6 +370,8 @@ class PyramidFlowTextEncode:
         }
 
         return (embeds, )
+    
+#region VAE
 class PyramidFlowVAEEncode:
     @classmethod
     def INPUT_TYPES(s):
