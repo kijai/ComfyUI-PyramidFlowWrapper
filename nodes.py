@@ -45,7 +45,7 @@ class PyramidFlowTorchCompileSettings:
                 "compile_rest": ("BOOLEAN", {"default": True, "tooltip": "Compile the rest of the model (proj and norm out)"}),
             },
         }
-    RETURN_TYPES = ("MOCHICOMPILEARGS",)
+    RETURN_TYPES = ("PYRAMIDFLOW_COMPILEARGS",)
     RETURN_NAMES = ("torch_compile_args",)
     FUNCTION = "loadmodel"
     CATEGORY = "MochiWrapper"
@@ -75,7 +75,7 @@ class PyramidFlowVAELoader:
                     "precision": (["fp16", "bf16", "fp32"], {"default": "bf16"}),
             },
             "optional": {
-                "compile_args": ("MOCHICOMPILEARGS", {"tooltip": "Optional torch.compile arguments",}),
+                "compile_args": ("PYRAMIDFLOW_COMPILEARGS", {"tooltip": "Optional torch.compile arguments",}),
             }
         }
 
@@ -127,7 +127,7 @@ class PyramidFlowModelLoader:
                 "enable_sequential_cpu_offload": ("BOOLEAN", {"default": False, "tooltip": "Enable sequential cpu offload, saves VRAM but is MUCH slower, do not use unless you have to"}),
             },
             "optional": {
-                "compile_args": ("MOCHICOMPILEARGS", {"tooltip": "Optional torch.compile arguments",}),
+                "compile_args": ("PYRAMIDFLOW_COMPILEARGS", {"tooltip": "Optional torch.compile arguments",}),
             }
         }
 
@@ -425,6 +425,7 @@ class PyramidFlowVAEDecode:
                 "vae": ("PYRAMIDFLOWVAE",),
                 "samples": ("LATENT",),
                 "tile_sample_min_size": ("INT", {"default": 256, "min": 64, "max": 512, "step": 8}),
+                "overlap_factor": ("FLOAT", {"default": 0.25, "min": 0.0, "max": 1.0, "step": 0.01}),
                 "window_size": ("INT", {"default": 2, "min": 1, "max": 4, "step": 1}),
                 "enable_tiling": ("BOOLEAN", {"default": True}),
             },
@@ -435,7 +436,7 @@ class PyramidFlowVAEDecode:
     FUNCTION = "sample"
     CATEGORY = "PyramidFlowWrapper"
 
-    def sample(self, vae, samples, tile_sample_min_size, window_size, enable_tiling):
+    def sample(self, vae, samples, tile_sample_min_size, window_size, enable_tiling, overlap_factor=0.25):
         mm.soft_empty_cache()
 
         latents = samples["samples"]
@@ -446,6 +447,8 @@ class PyramidFlowVAEDecode:
             vae.enable_tiling()
         else:
             vae.disable_tiling()
+        
+        vae.decode_tile_overlap_factor = overlap_factor
 
         # For the image latent
         vae_shift_factor = 0.1490
