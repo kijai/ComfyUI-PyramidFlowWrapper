@@ -22,7 +22,12 @@ try:
     from flash_attn.flash_attn_interface import flash_attn_varlen_func
 except:
     flash_attn_varlen_func = None
-    
+
+@torch.compiler.disable()  
+def compute_attention(query, key, value, attn_mask, dropout_p=0.0, is_causal=False):
+    return F.scaled_dot_product_attention(
+        query, key, value, dropout_p=dropout_p, is_causal=is_causal, attn_mask=attn_mask,
+    )
 
 def apply_rope(xq, xk, freqs_cis):
     xq_ = xq.float().reshape(*xq.shape[:-1], -1, 1, 2)
@@ -204,7 +209,7 @@ class VarlenSelfAttentionWithT5Mask:
             value = value.transpose(1, 2)
 
             # with torch.backends.cuda.sdp_kernel(enable_math=False, enable_flash=False, enable_mem_efficient=True):
-            stage_hidden_states = F.scaled_dot_product_attention(
+            stage_hidden_states = compute_attention(
                 query, key, value, dropout_p=0.0, is_causal=False, attn_mask=attention_mask[i_p],
             )
             stage_hidden_states = stage_hidden_states.transpose(1, 2).flatten(2, 3)   # [bs, tot_seq, dim]
@@ -218,6 +223,7 @@ class VarlenSelfAttentionWithT5Mask:
         output_hidden = torch.cat(output_hidden_list, dim=1)
 
         return output_hidden, output_encoder_hidden
+
 
 class VarlenFlashSelfAttnSingle:
 
@@ -312,7 +318,7 @@ class VarlenSelfAttnSingle:
             key = key.transpose(1, 2).contiguous()
             value = value.transpose(1, 2).contiguous()
 
-            stage_hidden_states = F.scaled_dot_product_attention(
+            stage_hidden_states = compute_attention(
                 query, key, value, dropout_p=0.0, is_causal=False, attn_mask=attention_mask[i_p],
             )
             stage_hidden_states = stage_hidden_states.transpose(1, 2).flatten(2, 3)   # [bs, tot_seq, dim]

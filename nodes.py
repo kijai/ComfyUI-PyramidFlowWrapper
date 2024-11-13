@@ -43,6 +43,7 @@ class PyramidFlowTorchCompileSettings:
                 "double_blocks": ("BOOLEAN", {"default": True, "tooltip": "Compile transformer blocks"}),
                 "embedders": ("BOOLEAN", {"default": True, "tooltip": "Compile embedders"}),
                 "compile_rest": ("BOOLEAN", {"default": True, "tooltip": "Compile the rest of the model (proj and norm out)"}),
+                "dynamo_cache_size_limit": ("INT", {"default": 64, "min": 0, "max": 1024, "step": 1, "tooltip": "torch._dynamo.config.cache_size_limit"}),
             },
         }
     RETURN_TYPES = ("PYRAMIDFLOW_COMPILEARGS",)
@@ -51,7 +52,7 @@ class PyramidFlowTorchCompileSettings:
     CATEGORY = "MochiWrapper"
     DESCRIPTION = "torch.compile settings, when connected to the model loader, torch.compile of the selected layers is attempted. Requires Triton and torch 2.5.0 is recommended"
 
-    def loadmodel(self, backend, fullgraph, mode, compile_whole_model, single_blocks, double_blocks, embedders, compile_rest):
+    def loadmodel(self, backend, fullgraph, mode, compile_whole_model, single_blocks, double_blocks, embedders, compile_rest, dynamo_cache_size_limit):
 
         compile_args = {
             "backend": backend,
@@ -62,6 +63,7 @@ class PyramidFlowTorchCompileSettings:
             "double_blocks": double_blocks,
             "embedders": embedders,
             "compile_rest": compile_rest,
+            "dynamo_cache_size_limit": dynamo_cache_size_limit,
         }
 
         return (compile_args, )
@@ -175,7 +177,7 @@ class PyramidFlowModelLoader:
             with open(config_path) as f:
                 config = json.load(f)
             transformer = PyramidDiffusionMMDiT.from_config(config)
-            params_to_keep = {"pos_embedding"}
+            params_to_keep = {"pos_embedding", "norm_k", "norm_q", "norm_v", "norm_added_k", "norm_added_q", "bias"}
             if is_accelerate_available:
                 logging.info("Using accelerate to load and assign model weights to device...")
                 for name, param in transformer.named_parameters():
@@ -192,12 +194,13 @@ class PyramidFlowModelLoader:
 
         if precision == "fp8_e4m3fn_fast":
             from .fp8_optimization import convert_fp8_linear
-            convert_fp8_linear(transformer, torch.bfloat16)
+            convert_fp8_linear(transformer, torch.bfloat16, params_to_keep=params_to_keep)
         
         transformer.to(device)
         #torch.compile
         if compile_args is not None:
             torch._dynamo.config.force_parameter_static_shapes = False
+            torch._dynamo.config.cache_size_limit = compile_args["dynamo_cache_size_limit"]
             dynamic = True # because of the stages the compiliation should be dynamic
             if compile_args["compile_whole_model"]:
                 transformer = torch.compile(transformer, fullgraph=compile_args["fullgraph"], dynamic=dynamic, backend=compile_args["backend"])
@@ -379,7 +382,8 @@ class PyramidFlowVAEEncode:
             "required": {
                 "vae": ("PYRAMIDFLOWVAE",),
                 "image": ("IMAGE",), 
-                "enable_tiling": ("BOOLEAN", {"default": False}),           
+                "enable_tiling": ("BOOLEAN", {"default": False}),
+                "overlap_factor": ("FLOAT", {"default": 0.25, "min": 0.0, "max": 1.0, "step": 0.01}),
             },
         }
 
@@ -388,7 +392,7 @@ class PyramidFlowVAEEncode:
     FUNCTION = "sample"
     CATEGORY = "PyramidFlowWrapper"
 
-    def sample(self, vae, image, enable_tiling):
+    def sample(self, vae, image, enable_tiling, overlap_factor):
         B, H, W, C = image.shape
         mm.soft_empty_cache()
 
@@ -399,6 +403,8 @@ class PyramidFlowVAEEncode:
             vae.disable_tiling()
         device = mm.get_torch_device()
         offload_device = mm.unet_offload_device()
+
+        vae.encode_tile_overlap_factor = overlap_factor
 
         # For the image latent
         vae_shift_factor = 0.1490

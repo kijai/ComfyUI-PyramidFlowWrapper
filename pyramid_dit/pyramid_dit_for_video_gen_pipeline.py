@@ -150,7 +150,6 @@ class PyramidDiTForVideoGeneration:
         latents = randn_tensor(shape, generator=generator, device=device, dtype=dtype)
         return latents
     
-    
     def sample_block_noise(self, bs, ch, temp, height, width):
         block_number = bs * ch * temp * (height // 2) * (width // 2)
         noise = torch.stack([self.dist.sample() for _ in range(block_number)]) # [block number, 4]
