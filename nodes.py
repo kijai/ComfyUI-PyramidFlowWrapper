@@ -156,41 +156,40 @@ class PyramidFlowModelLoader:
         else:
             model_name = "pyramid_flux"
         
-        if model_name == "pyramid_flux":
-            config_path = os.path.join(script_directory, 'configs', 'miniflux_transformer_config.json')
-            with open(config_path) as f:
-                config = json.load(f)
+        model_configs = {
+            "pyramid_flux": {
+                "config_file": "miniflux_transformer_config.json",
+                "transformer_class": PyramidFluxTransformer,
+                "params_to_keep": {"pos_embedding", "norm_k", "norm_q", "norm_v", "norm_added_k", "norm_added_q", "bias"}
+            },
+            "pyramid_mmdit": {
+                "config_file": "mmdit_transformer_config.json",
+                "transformer_class": PyramidDiffusionMMDiT,
+                "params_to_keep": {"pos_embedding"}
+            }
+        }
 
-            with (init_empty_weights() if is_accelerate_available else nullcontext()):
-                transformer = PyramidFluxTransformer.from_config(config)
-
-            if is_accelerate_available:
-                logging.info("Using accelerate to load and assign model weights to device...")
-                for name, param in transformer.named_parameters():
-                    set_module_tensor_to_device(transformer, name, dtype=dtype, device=device, value=transformer_sd[name])
-            else:
-                transformer.load_state_dict(transformer_sd)
-                transformer = transformer.to(dtype)
-
-        elif model_name == "pyramid_mmdit":
-            config_path = os.path.join(script_directory, 'configs', 'mmdit_transformer_config.json')
-            with open(config_path) as f:
-                config = json.load(f)
-            transformer = PyramidDiffusionMMDiT.from_config(config)
-            params_to_keep = {"pos_embedding", "norm_k", "norm_q", "norm_v", "norm_added_k", "norm_added_q", "bias"}
-            if is_accelerate_available:
-                logging.info("Using accelerate to load and assign model weights to device...")
-                for name, param in transformer.named_parameters():
-                    if not any(keyword in name for keyword in params_to_keep):
-                        set_module_tensor_to_device(transformer, name, dtype=dtype, device=device, value=transformer_sd[name])
-                    else:
-                        set_module_tensor_to_device(transformer, name, dtype=torch.bfloat16, device=device, value=transformer_sd[name])
-            else:
-                transformer.load_state_dict(transformer_sd)
-                if dtype in [torch.float8_e4m3fn, torch.float8_e5m2]:
-                    for name, param in transformer.named_parameters():
-                        if not any(keyword in name for keyword in params_to_keep):
-                            param.data = param.data.to(dtype)
+        config_info = model_configs[model_name]
+        config_path = os.path.join(script_directory, 'configs', config_info["config_file"])
+        
+        with open(config_path) as f:
+            config = json.load(f)
+        
+        with (init_empty_weights() if is_accelerate_available else nullcontext()):
+            transformer = config_info["transformer_class"].from_config(config)
+        
+        params_to_keep = config_info["params_to_keep"]
+        
+        if is_accelerate_available:
+            logging.info("Using accelerate to load and assign model weights to device...")
+            for name, param in transformer.named_parameters():
+                dtype_to_use = torch.bfloat16 if any(keyword in name for keyword in params_to_keep) else dtype
+                set_module_tensor_to_device(transformer, name, dtype=dtype_to_use, device=device, value=transformer_sd[name])
+        else:
+            transformer.load_state_dict(transformer_sd)
+            if dtype in [torch.float8_e4m3fn, torch.float8_e5m2]:
+                for param in transformer.parameters():
+                    param.data = param.data.to(dtype)
 
         if precision == "fp8_e4m3fn_fast":
             from .fp8_optimization import convert_fp8_linear

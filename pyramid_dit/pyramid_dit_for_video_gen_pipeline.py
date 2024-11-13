@@ -28,6 +28,7 @@ def compute_density_for_timestep_sampling(
         u = torch.rand(size=(batch_size,), device="cpu")
     return u
 
+
 class PyramidDiTForVideoGeneration:
     """
         The pyramid dit for both image and video generation, The running class wrapper
