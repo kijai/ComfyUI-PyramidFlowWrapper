@@ -182,8 +182,9 @@ class PyramidFlowModelLoader:
         
         if is_accelerate_available:
             logging.info("Using accelerate to load and assign model weights to device...")
+            base_dtype = torch.bfloat16 if dtype != torch.float32 else torch.float32
             for name, param in transformer.named_parameters():
-                dtype_to_use = torch.bfloat16 if any(keyword in name for keyword in params_to_keep) else dtype
+                dtype_to_use = base_dtype if any(keyword in name for keyword in params_to_keep) else dtype
                 set_module_tensor_to_device(transformer, name, dtype=dtype_to_use, device=device, value=transformer_sd[name])
         else:
             transformer.load_state_dict(transformer_sd)
