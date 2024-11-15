@@ -111,85 +111,9 @@
       },
       "widgets_values": [
         "lanczos",
-        640,
-        384,
+        1280,
+        768,
         "center"
-      ]
-    },
-    {
-      "id": 58,
-      "type": "PrimitiveNode",
-      "pos": {
-        "0": 347,
-        "1": 817
-      },
-      "size": {
-        "0": 256.92181396484375,
-        "1": 82
-      },
-      "flags": {},
-      "order": 2,
-      "mode": 0,
-      "inputs": [],
-      "outputs": [
-        {
-          "name": "INT",
-          "type": "INT",
-          "links": [
-            91,
-            94
-          ],
-          "slot_index": 0,
-          "widget": {
-            "name": "width"
-          }
-        }
-      ],
-      "title": "width",
-      "properties": {
-        "Run widget replace on values": false
-      },
-      "widgets_values": [
-        640,
-        "fixed"
-      ]
-    },
-    {
-      "id": 59,
-      "type": "PrimitiveNode",
-      "pos": {
-        "0": 350,
-        "1": 945
-      },
-      "size": {
-        "0": 251.2918701171875,
-        "1": 82
-      },
-      "flags": {},
-      "order": 3,
-      "mode": 0,
-      "inputs": [],
-      "outputs": [
-        {
-          "name": "INT",
-          "type": "INT",
-          "links": [
-            93,
-            95
-          ],
-          "slot_index": 0,
-          "widget": {
-            "name": "height"
-          }
-        }
-      ],
-      "title": "height",
-      "properties": {
-        "Run widget replace on values": false
-      },
-      "widgets_values": [
-        384,
-        "fixed"
       ]
     },
     {
@@ -248,7 +172,7 @@
         "1": 314
       },
       "flags": {},
-      "order": 4,
+      "order": 2,
       "mode": 0,
       "inputs": [],
       "outputs": [
@@ -311,79 +235,6 @@
         "FPV flying over seaside cliffs while the sun is setting, hyper quality, Ultra HD, 8K",
         "cartoon style, worst quality, low quality, blurry, absolute black, absolute white, low res, extra limbs, extra digits, misplaced objects, mutated anatomy, monochrome, horror",
         true
-      ]
-    },
-    {
-      "id": 50,
-      "type": "PyramidFlowSampler",
-      "pos": {
-        "0": 1046,
-        "1": 144
-      },
-      "size": {
-        "0": 315,
-        "1": 314
-      },
-      "flags": {},
-      "order": 10,
-      "mode": 0,
-      "inputs": [
-        {
-          "name": "model",
-          "type": "PYRAMIDFLOWMODEL",
-          "link": 74
-        },
-        {
-          "name": "prompt_embeds",
-          "type": "PYRAMIDFLOWPROMPT",
-          "link": 81
-        },
-        {
-          "name": "input_latent",
-          "type": "LATENT",
-          "link": 83,
-          "shape": 7
-        },
-        {
-          "name": "width",
-          "type": "INT",
-          "link": 94,
-          "widget": {
-            "name": "width"
-          }
-        },
-        {
-          "name": "height",
-          "type": "INT",
-          "link": 95,
-          "widget": {
-            "name": "height"
-          }
-        }
-      ],
-      "outputs": [
-        {
-          "name": "samples",
-          "type": "LATENT",
-          "links": [
-            76
-          ]
-        }
-      ],
-      "properties": {
-        "Node name for S&R": "PyramidFlowSampler"
-      },
-      "widgets_values": [
-        640,
-        384,
-        "20, 20, 20",
-        "10, 10, 10",
-        16,
-        7,
-        4,
-        44664248661402,
-        "fixed",
-        false
       ]
     },
     {
@@ -471,7 +322,7 @@
         "1": 82
       },
       "flags": {},
-      "order": 5,
+      "order": 3,
       "mode": 0,
       "inputs": [
         {
@@ -501,11 +352,87 @@
       ]
     },
     {
+      "id": 58,
+      "type": "PrimitiveNode",
+      "pos": {
+        "0": 347,
+        "1": 817
+      },
+      "size": {
+        "0": 256.92181396484375,
+        "1": 82
+      },
+      "flags": {},
+      "order": 4,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "INT",
+          "type": "INT",
+          "links": [
+            91,
+            94
+          ],
+          "slot_index": 0,
+          "widget": {
+            "name": "width"
+          }
+        }
+      ],
+      "title": "width",
+      "properties": {
+        "Run widget replace on values": false
+      },
+      "widgets_values": [
+        1280,
+        "fixed"
+      ]
+    },
+    {
+      "id": 59,
+      "type": "PrimitiveNode",
+      "pos": {
+        "0": 350,
+        "1": 945
+      },
+      "size": {
+        "0": 251.2918701171875,
+        "1": 82
+      },
+      "flags": {},
+      "order": 5,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "INT",
+          "type": "INT",
+          "links": [
+            93,
+            95
+          ],
+          "slot_index": 0,
+          "widget": {
+            "name": "height"
+          }
+        }
+      ],
+      "title": "height",
+      "properties": {
+        "Run widget replace on values": false
+      },
+      "widgets_values": [
+        768,
+        "fixed"
+      ]
+    },
+    {
       "id": 48,
       "type": "PyramidFlowVAEDecode",
       "pos": {
-        "0": 1051,
-        "1": 534
+        "0": 1032,
+        "1": 571
       },
       "size": {
         "0": 315,
@@ -550,8 +477,8 @@
       "id": 40,
       "type": "PyramidFlowTransformerLoader",
       "pos": {
-        "0": 230,
-        "1": 114
+        "0": 226,
+        "1": 92
       },
       "size": {
         "0": 444.05462646484375,
@@ -582,8 +509,81 @@
         "Node name for S&R": "PyramidFlowTransformerLoader"
       },
       "widgets_values": [
-        "pyramidflow\\pyramid_flow_miniflux_bf16_v2.safetensors",
+        "pyramidflow\\pyramid_flow_miniflux_768_bf16.safetensors",
         "bf16",
+        false
+      ]
+    },
+    {
+      "id": 50,
+      "type": "PyramidFlowSampler",
+      "pos": {
+        "0": 1028,
+        "1": -15
+      },
+      "size": {
+        "0": 315,
+        "1": 518
+      },
+      "flags": {},
+      "order": 10,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "model",
+          "type": "PYRAMIDFLOWMODEL",
+          "link": 74
+        },
+        {
+          "name": "prompt_embeds",
+          "type": "PYRAMIDFLOWPROMPT",
+          "link": 81
+        },
+        {
+          "name": "input_latent",
+          "type": "LATENT",
+          "link": 83,
+          "shape": 7
+        },
+        {
+          "name": "width",
+          "type": "INT",
+          "link": 94,
+          "widget": {
+            "name": "width"
+          }
+        },
+        {
+          "name": "height",
+          "type": "INT",
+          "link": 95,
+          "widget": {
+            "name": "height"
+          }
+        }
+      ],
+      "outputs": [
+        {
+          "name": "samples",
+          "type": "LATENT",
+          "links": [
+            76
+          ]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "PyramidFlowSampler"
+      },
+      "widgets_values": [
+        1280,
+        768,
+        "20, 20, 20",
+        "10, 10, 10",
+        16,
+        7,
+        5,
+        44664248661402,
+        "fixed",
         false
       ]
     }
@@ -706,10 +706,10 @@
   "config": {},
   "extra": {
     "ds": {
-      "scale": 0.6934334949442648,
+      "scale": 0.7627768444386913,
       "offset": [
-        667.6026332109438,
-        191.25659609525596
+        86.13055347478304,
+        125.09485874927132
       ]
     }
   },

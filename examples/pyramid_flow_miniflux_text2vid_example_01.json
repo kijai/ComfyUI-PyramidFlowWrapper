@@ -26,51 +26,6 @@
       "bgcolor": "#653"
     },
     {
-      "id": 48,
-      "type": "PyramidFlowVAEDecode",
-      "pos": {
-        "0": 1051,
-        "1": 534
-      },
-      "size": {
-        "0": 315,
-        "1": 126
-      },
-      "flags": {},
-      "order": 6,
-      "mode": 0,
-      "inputs": [
-        {
-          "name": "vae",
-          "type": "PYRAMIDFLOWVAE",
-          "link": 71
-        },
-        {
-          "name": "samples",
-          "type": "LATENT",
-          "link": 76
-        }
-      ],
-      "outputs": [
-        {
-          "name": "images",
-          "type": "IMAGE",
-          "links": [
-            77
-          ],
-          "slot_index": 0
-        }
-      ],
-      "properties": {
-        "Node name for S&R": "PyramidFlowVAEDecode"
-      },
-      "widgets_values": [
-        256,
-        2,
-        true
-      ]
-    },
-    {
       "id": 37,
       "type": "DualCLIPLoader",
       "pos": {
@@ -162,46 +117,6 @@
       ]
     },
     {
-      "id": 40,
-      "type": "PyramidFlowTransformerLoader",
-      "pos": {
-        "0": 225,
-        "1": 140
-      },
-      "size": {
-        "0": 444.05462646484375,
-        "1": 82
-      },
-      "flags": {},
-      "order": 2,
-      "mode": 0,
-      "inputs": [
-        {
-          "name": "compile_args",
-          "type": "MOCHICOMPILEARGS",
-          "link": null,
-          "shape": 7
-        }
-      ],
-      "outputs": [
-        {
-          "name": "pyramidflow_model",
-          "type": "PYRAMIDFLOWMODEL",
-          "links": [
-            74
-          ],
-          "slot_index": 0
-        }
-      ],
-      "properties": {
-        "Node name for S&R": "PyramidFlowTransformerLoader"
-      },
-      "widgets_values": [
-        "pyramidflow\\pyramid_flow_miniflux_bf16_v2.safetensors",
-        "bf16"
-      ]
-    },
-    {
       "id": 43,
       "type": "PyramidFlowVAELoader",
       "pos": {
@@ -213,12 +128,12 @@
         "1": 82
       },
       "flags": {},
-      "order": 3,
+      "order": 2,
       "mode": 0,
       "inputs": [
         {
           "name": "compile_args",
-          "type": "MOCHICOMPILEARGS",
+          "type": "PYRAMIDFLOW_COMPILEARGS",
           "link": null,
           "shape": 7
         }
@@ -248,10 +163,10 @@
         "0": 444,
         "1": 476
       },
-      "size": [
-        437.19819084177436,
-        269.9795836111515
-      ],
+      "size": {
+        "0": 437.19818115234375,
+        "1": 269.9795837402344
+      },
       "flags": {},
       "order": 4,
       "mode": 0,
@@ -289,8 +204,8 @@
         "1": 113
       },
       "size": [
-        1018.2306485015952,
-        922.9384155273438
+        1018.2306518554688,
+        310
       ],
       "flags": {},
       "order": 7,
@@ -353,6 +268,93 @@
           "muted": false
         }
       }
+    },
+    {
+      "id": 40,
+      "type": "PyramidFlowTransformerLoader",
+      "pos": {
+        "0": 225,
+        "1": 107
+      },
+      "size": {
+        "0": 444.05462646484375,
+        "1": 106
+      },
+      "flags": {},
+      "order": 3,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "compile_args",
+          "type": "PYRAMIDFLOW_COMPILEARGS",
+          "link": null,
+          "shape": 7
+        }
+      ],
+      "outputs": [
+        {
+          "name": "pyramidflow_model",
+          "type": "PYRAMIDFLOWMODEL",
+          "links": [
+            74
+          ],
+          "slot_index": 0
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "PyramidFlowTransformerLoader"
+      },
+      "widgets_values": [
+        "pyramidflow\\pyramid_flow_miniflux_bf16_v2.safetensors",
+        "bf16",
+        false
+      ]
+    },
+    {
+      "id": 48,
+      "type": "PyramidFlowVAEDecode",
+      "pos": {
+        "0": 1051,
+        "1": 534
+      },
+      "size": {
+        "0": 315,
+        "1": 150
+      },
+      "flags": {},
+      "order": 6,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "vae",
+          "type": "PYRAMIDFLOWVAE",
+          "link": 71
+        },
+        {
+          "name": "samples",
+          "type": "LATENT",
+          "link": 76
+        }
+      ],
+      "outputs": [
+        {
+          "name": "images",
+          "type": "IMAGE",
+          "links": [
+            77
+          ],
+          "slot_index": 0
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "PyramidFlowVAEDecode"
+      },
+      "widgets_values": [
+        256,
+        0.25,
+        true,
+        true
+      ]
     }
   ],
   "links": [
@@ -409,10 +411,10 @@
   "config": {},
   "extra": {
     "ds": {
-      "scale": 0.7627768444386932,
+      "scale": 0.6934334949442648,
       "offset": [
-        205.40187889258976,
-        148.78644149639825
+        667.6026332109438,
+        191.25659609525596
       ]
     }
   },
